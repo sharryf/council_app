@@ -1,0 +1,20 @@
+/*
+ * Self-hosted Dhivehi typefaces for the Bureau panel — see
+ * BureauPanelProvider's own comment for why these two (Faruma for body,
+ * Mv Galan Normal for headings) instead of the single Noto Sans Thaana
+ * used previously. Neither is on Google/Bunny Fonts, so they're served
+ * as local files rather than through Filament's font-provider CDNs.
+ */
+@font-face {
+    font-family: 'Faruma';
+    src: url('/fonts/bureau/Faruma.otf') format('opentype');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Mv Galan Normal';
+    src: url('/fonts/bureau/MvGalanNormal.otf') format('opentype');
+    font-weight: 400;
+    font-display: swap;
+}
