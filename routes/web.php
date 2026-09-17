@@ -68,6 +68,9 @@ Route::middleware('auth')->group(function () {
     Route::get('assets/export/assets', [AssetExportController::class, 'assets'])
         ->name('assets.export.assets');
 
+    Route::get('assets/export/assets-pdf', [AssetExportController::class, 'assetsPdf'])
+        ->name('assets.export.assets-pdf');
+
     Route::get('assets/export/transfers', [AssetExportController::class, 'transfers'])
         ->name('assets.export.transfers');
 

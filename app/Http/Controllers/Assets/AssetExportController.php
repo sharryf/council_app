@@ -10,6 +10,8 @@ use App\Models\AssetMaintenanceRecord;
 use App\Models\AssetTransferRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+use Spatie\Browsershot\Browsershot;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -21,10 +23,57 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * list's own table (passed as a `filters` query param, shaped exactly
  * like Livewire's own $tableFilters — see ListAssets' export action)
  * so the export matches what's on screen; the other three have no
- * table filters to mirror.
+ * table filters to mirror. assetsPdf() shares the same filtered
+ * dataset through assetsReportData() and renders it via a bare
+ * Browsershot call (no InventoryPdfRenderer-style settings-driven
+ * header/footer — Assets has no equivalent AssetSetting keys for
+ * that), matching ReportExportController::pdf()'s CSV/PDF pairing. Its
+ * column set is independently user-chosen (see EXPORT_FIELDS below),
+ * unlike the CSV export's fixed register-format columns.
  */
 class AssetExportController extends Controller
 {
+    /**
+     * The full universe of columns the PDF export's field-picker
+     * checkbox list can show, keyed for both the request's `fields[]`
+     * query values and exportFieldValue()'s match arm — order here is
+     * the canonical order for both the checkbox list and the rendered
+     * PDF, regardless of the order fields were ticked in.
+     */
+    public const EXPORT_FIELDS = [
+        'asset_tag' => 'Asset Tag',
+        'name' => 'Asset Name',
+        'category' => 'Category',
+        'status' => 'Condition',
+        'brand' => 'Brand',
+        'model' => 'Model',
+        'serial_number' => 'Serial No',
+        'purchase_date' => 'Purchase Date',
+        'purchase_price' => 'Purchase Price',
+        'main_inventory_no' => 'Main Inventory No',
+        'asset_class_code' => 'Code',
+        'location' => 'Location',
+        'room' => 'Room',
+        'lifecycle_status' => 'Register Status',
+        'description' => 'Description',
+        'vendor' => 'Vendor',
+        'fund_code' => 'Fund Code',
+        'gl_code' => 'GL Code',
+        'po_number' => 'PO Number',
+        'voucher_number' => 'Voucher Number',
+        'donation_reference_no' => 'Donation Ref No',
+        'asset_type' => 'Asset Type',
+    ];
+
+    /**
+     * Ticked by default in the field-picker, in this exact order —
+     * everything else in EXPORT_FIELDS starts unticked.
+     */
+    public const DEFAULT_EXPORT_FIELDS = [
+        'asset_tag', 'name', 'category', 'status', 'brand', 'model',
+        'serial_number', 'purchase_date', 'purchase_price',
+    ];
+
     private function authorize(): void
     {
         /** @var \App\Models\User|null $user */
@@ -36,8 +85,89 @@ class AssetExportController extends Controller
     {
         $this->authorize();
 
-        $filters = $request->query('filters', []);
+        [$header, $rows] = $this->assetsReportData($request->query('filters', []));
 
+        return $this->streamCsv('Assets', $header, $rows, 'assets');
+    }
+
+    public function assetsPdf(Request $request): StreamedResponse
+    {
+        $this->authorize();
+
+        // Re-key against EXPORT_FIELDS (not the raw query values) so
+        // the result is both validated and always in canonical order,
+        // no matter what order the field-picker's checkboxes submitted.
+        $requested = $request->query('fields', self::DEFAULT_EXPORT_FIELDS);
+        $fields = array_keys(array_intersect_key(self::EXPORT_FIELDS, array_flip($requested)));
+
+        if ($fields === []) {
+            $fields = self::DEFAULT_EXPORT_FIELDS;
+        }
+
+        $query = $this->filteredAssetsQuery($request->query('filters', []));
+
+        $header = array_map(fn (string $field): string => self::EXPORT_FIELDS[$field], $fields);
+
+        $rows = $query->orderBy('name')->get()->map(fn (Asset $asset): array => array_map(
+            fn (string $field) => $this->exportFieldValue($asset, $field),
+            $fields,
+        ));
+
+        $html = view('assets.pdf.assets-report', [
+            'header' => $header,
+            'rows' => $rows,
+            'generatedAt' => now()->format('d/m/Y H:i'),
+        ])->render();
+
+        $relativePath = 'assets/exports/assets-'.now()->timestamp.'.pdf';
+        Storage::disk('local')->makeDirectory(dirname($relativePath));
+
+        Browsershot::html($html)
+            ->noSandbox()
+            ->writeOptionsToFile()
+            ->format('A4')
+            ->landscape()
+            ->showBackground()
+            ->margins(15, 10, 15, 10)
+            ->savePdf(Storage::disk('local')->path($relativePath));
+
+        return Storage::disk('local')->response($relativePath, 'assets-'.now()->format('Y-m-d').'.pdf');
+    }
+
+    private function exportFieldValue(Asset $asset, string $field): mixed
+    {
+        return match ($field) {
+            'asset_tag' => $asset->asset_tag,
+            'name' => $asset->name,
+            'category' => $asset->category?->parent?->name ?? $asset->category?->name,
+            'status' => $asset->status?->getLabel(),
+            'brand' => $asset->brand,
+            'model' => $asset->model,
+            'serial_number' => $asset->serial_number,
+            'purchase_date' => $asset->purchase_date?->toDateString(),
+            'purchase_price' => $asset->purchase_price,
+            'main_inventory_no' => $asset->main_inventory_no,
+            'asset_class_code' => $asset->category?->asset_class_code,
+            'location' => $asset->room?->building?->name,
+            'room' => $asset->room?->name,
+            'lifecycle_status' => $asset->lifecycle_status?->getLabel(),
+            'description' => $asset->description,
+            'vendor' => $asset->vendor,
+            'fund_code' => $asset->fund_code,
+            'gl_code' => $asset->category?->gl_code ?? $asset->category?->parent?->gl_code,
+            'po_number' => $asset->po_number,
+            'voucher_number' => $asset->voucher_number,
+            'donation_reference_no' => $asset->donation_reference_no,
+            'asset_type' => $asset->asset_type?->getLabel(),
+            default => null,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function filteredAssetsQuery(array $filters): \Illuminate\Database\Eloquent\Builder
+    {
         $query = Asset::query()->with(['category.parent', 'room.building']);
 
         if ($categoryIds = $filters['category_id']['values'] ?? null) {
@@ -59,6 +189,17 @@ class AssetExportController extends Controller
         if ($to = $filters['purchase_date']['purchased_to'] ?? null) {
             $query->whereDate('purchase_date', '<=', $to);
         }
+
+        return $query;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array{0: array<int, string>, 1: \Illuminate\Support\Collection<int, array<int, mixed>>}
+     */
+    private function assetsReportData(array $filters): array
+    {
+        $query = $this->filteredAssetsQuery($filters);
 
         // Column set and order mirror the council's own current asset
         // register ("Asset Detailed Report.xlsx"), minus the columns
@@ -89,7 +230,7 @@ class AssetExportController extends Controller
             $asset->donation_reference_no,
         ]);
 
-        return $this->streamCsv('Assets', $header, $rows, 'assets');
+        return [$header, $rows];
     }
 
     public function transfers(): StreamedResponse
@@ -147,7 +288,7 @@ class AssetExportController extends Controller
     {
         $this->authorize();
 
-        $header = ['Tag', 'Asset', 'Expected Room', 'Verified At', 'Verify Method', 'Found Room', 'Outcome', 'Review Action', 'Review Note'];
+        $header = ['Tag', 'Asset', 'Expected Room', 'Verified At', 'Verify Method', 'Found Room', 'Outcome'];
 
         $rows = AssetAuditItem::query()
             ->where('session_id', $session->id)
@@ -161,8 +302,6 @@ class AssetExportController extends Controller
                 $item->verify_method?->getLabel(),
                 $item->foundRoom?->path(),
                 $item->outcome?->getLabel(),
-                $item->review_action?->getLabel(),
-                $item->review_note,
             ]);
 
         return $this->streamCsv("Audit — {$session->name}", $header, $rows, "audit-{$session->id}");

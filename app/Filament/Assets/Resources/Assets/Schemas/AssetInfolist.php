@@ -6,6 +6,7 @@ use App\Models\Asset;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -16,28 +17,43 @@ class AssetInfolist
         return $schema
             ->columns(1)
             ->components([
+                // A product-card header: a large photo alongside the
+                // asset's identity and lifecycle at a glance, before any
+                // of the detail sections below.
                 Section::make()
-                    ->columns(4)
+                    ->columns(3)
                     ->schema([
                         ImageEntry::make('photo_attachment_id')
                             ->hiddenLabel()
                             ->getStateUsing(fn (Asset $record): ?string => $record->photo_attachment_id
                                 ? route('assets.attachments.show', $record->photo_attachment_id)
                                 : null)
-                            ->height(120)
+                            ->height(220)
                             ->columnSpan(1),
-                        TextEntry::make('name')->label('Name')->weight('bold')->size('lg')->columnSpan(3),
-                        TextEntry::make('asset_tag')->label('Asset tag'),
-                        TextEntry::make('status')->label('Status')->badge(),
-                        TextEntry::make('category.name')->label('Category')->formatStateUsing(fn (Asset $record): string => $record->category?->path() ?? '—'),
-                        TextEntry::make('room.name')->label('Location')->formatStateUsing(fn (Asset $record): string => $record->room?->path() ?? '—'),
-                        TextEntry::make('transfer_pending')
-                            ->label('')
-                            ->state('Transfer Pending')
-                            ->badge()
-                            ->color('warning')
-                            ->visible(fn (Asset $record): bool => $record->hasPendingTransfer())
-                            ->columnSpanFull(),
+                        Grid::make(2)
+                            ->columnSpan(2)
+                            ->schema([
+                                TextEntry::make('asset_tag')->label('Asset tag')->badge()->color('primary')->size('md'),
+                                TextEntry::make('category.name')->label('Category')->formatStateUsing(fn (Asset $record): string => $record->category?->path() ?? '—'),
+                                TextEntry::make('status')->label('Condition')->badge(),
+                                TextEntry::make('lifecycle_status')->label('Register status')->badge(),
+                                TextEntry::make('room.name')->label('Location')->formatStateUsing(fn (Asset $record): string => $record->room?->path() ?? '—'),
+                                TextEntry::make('createdBy.name')->label('Posted by')->placeholder('—'),
+                                TextEntry::make('transfer_pending')
+                                    ->label('')
+                                    ->state('Location Change Pending')
+                                    ->badge()
+                                    ->color('warning')
+                                    ->visible(fn (Asset $record): bool => $record->hasPendingTransfer())
+                                    ->columnSpanFull(),
+                                TextEntry::make('edit_pending')
+                                    ->label('')
+                                    ->state('Edit Pending Approval')
+                                    ->badge()
+                                    ->color('warning')
+                                    ->visible(fn (Asset $record): bool => $record->hasPendingEditRequest())
+                                    ->columnSpanFull(),
+                            ]),
                     ]),
 
                 Section::make('Details')
@@ -50,7 +66,6 @@ class AssetInfolist
                         TextEntry::make('purchase_price')->label('Purchase price')->money('MVR')->placeholder('—'),
                         TextEntry::make('vendor')->label('Vendor / Supplier')->placeholder('—'),
                         TextEntry::make('description')->label('Description / Notes')->placeholder('—')->columnSpanFull(),
-                        TextEntry::make('createdBy.name')->label('Added by')->placeholder('—'),
                     ]),
 
                 Section::make('Register Details')
@@ -64,20 +79,33 @@ class AssetInfolist
                         TextEntry::make('donation_reference_no')->label('Donation document ref. no.')->placeholder('—'),
                     ]),
 
+                // Same compact log treatment as Maintenance/Location —
+                // one line per document, not a bordered card per row.
                 Section::make('Documents')
                     ->schema([
                         RepeatableEntry::make('documents')
                             ->hiddenLabel()
+                            ->contained(false)
                             ->schema([
                                 TextEntry::make('file_name')
                                     ->hiddenLabel()
+                                    ->formatStateUsing(fn ($record): string => sprintf(
+                                        '%s · %s',
+                                        $record->created_at->format('j M Y'),
+                                        $record->document_name ?: $record->file_name,
+                                    ))
+                                    ->size('sm')
+                                    ->color('gray')
                                     ->url(fn ($record): string => route('assets.attachments.show', $record->id))
                                     ->openUrlInNewTab(),
                             ])
-                            ->columns(2),
+                            ->columns(1),
                     ])
                     ->visible(fn (Asset $record): bool => $record->documents()->exists()),
 
+                // A plain log, same treatment as History below — one
+                // line per record (Date, Description, Logged by,
+                // Approval) instead of a bordered card per row.
                 Section::make('Maintenance')
                     ->schema([
                         TextEntry::make('open_maintenance_notice')
@@ -87,34 +115,76 @@ class AssetInfolist
                                 : null)
                             ->badge()
                             ->color('warning')
-                            ->visible(fn (Asset $record): bool => $record->openMaintenanceRecord() !== null)
-                            ->columnSpanFull(),
-                        RepeatableEntry::make('maintenanceRecords')
+                            ->visible(fn (Asset $record): bool => $record->openMaintenanceRecord() !== null),
+                        TextEntry::make('maintenance_log')
                             ->hiddenLabel()
-                            ->schema([
-                                TextEntry::make('maintenance_date')->label('Date')->date(),
-                                TextEntry::make('description')->label('Description')->limit(40),
-                                TextEntry::make('approval_status')->label('Approval')->badge(),
-                                TextEntry::make('closed_at')->label('Closed')->dateTime()->placeholder('Open'),
-                            ])
-                            ->columns(4),
+                            ->state(fn (Asset $record): array => $record->maintenanceRecords
+                                ->map(fn ($entry): string => sprintf(
+                                    '%s · %s · Logged by %s · %s',
+                                    $entry->maintenance_date->format('j M Y'),
+                                    $entry->description,
+                                    $entry->recordedBy?->name ?? 'System',
+                                    $entry->decisionSummary(),
+                                ))
+                                ->all())
+                            ->listWithLineBreaks()
+                            ->size('sm')
+                            ->color('gray'),
                     ])
                     ->visible(fn (Asset $record): bool => $record->maintenanceRecords()->exists()),
 
-                Section::make('History')
+                // Same compact log treatment as Maintenance — one line
+                // per request (Date, From, To, Reason, Approved).
+                Section::make('Location Changes')
                     ->schema([
-                        RepeatableEntry::make('history')
+                        TextEntry::make('location_log')
                             ->hiddenLabel()
-                            ->schema([
-                                TextEntry::make('created_at')->label('When')->dateTime(),
-                                TextEntry::make('performedBy.name')->label('By')->placeholder('System'),
-                                TextEntry::make('event_type')->label('Event'),
-                                TextEntry::make('field_name')->label('Field')->placeholder('—'),
-                                TextEntry::make('old_value')->label('From')->placeholder('—'),
-                                TextEntry::make('new_value')->label('To')->placeholder('—'),
-                                TextEntry::make('note')->label('Note')->placeholder('—')->columnSpanFull(),
-                            ])
-                            ->columns(6),
+                            ->state(fn (Asset $record): array => $record->transferRequests
+                                ->map(fn ($entry): string => sprintf(
+                                    '%s · %s → %s · %s · %s',
+                                    $entry->requested_at->format('j M Y'),
+                                    $entry->fromRoom?->name ?? '—',
+                                    $entry->toRoom?->name ?? '—',
+                                    $entry->reason ?: '—',
+                                    $entry->decisionSummary(),
+                                ))
+                                ->all())
+                            ->listWithLineBreaks()
+                            ->size('sm')
+                            ->color('gray'),
+                    ])
+                    ->visible(fn (Asset $record): bool => $record->transferRequests()->exists()),
+
+                // Only the asset's own create/edit/post lifecycle —
+                // maintenance and location changes have their own cards
+                // above, so they're left out here to keep this scannable.
+                Section::make('Edit History')
+                    ->schema([
+                        TextEntry::make('history_log')
+                            ->hiddenLabel()
+                            ->state(fn (Asset $record): array => $record->history
+                                ->whereIn('event_type', [
+                                    'created',
+                                    'posted',
+                                    'field_changed',
+                                    'photo_replaced',
+                                    'edit_requested',
+                                    'edit_approved',
+                                    'edit_rejected',
+                                    'delete_requested',
+                                    'delete_rejected',
+                                ])
+                                ->map(fn ($entry): string => sprintf(
+                                    '%s · %s · %s',
+                                    $entry->created_at->format('j M Y, H:i'),
+                                    $entry->performedBy?->name ?? 'System',
+                                    $entry->summary(),
+                                ))
+                                ->values()
+                                ->all())
+                            ->listWithLineBreaks()
+                            ->size('sm')
+                            ->color('gray'),
                     ]),
             ]);
     }

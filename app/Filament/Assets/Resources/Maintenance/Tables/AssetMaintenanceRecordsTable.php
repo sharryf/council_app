@@ -3,9 +3,6 @@
 namespace App\Filament\Assets\Resources\Maintenance\Tables;
 
 use App\Filament\Assets\Resources\Maintenance\AssetMaintenanceRecordResource;
-use App\Models\AssetMaintenanceRecord;
-use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,19 +21,6 @@ class AssetMaintenanceRecordsTable
                 TextColumn::make('cost')->label('Cost')->money('MVR')->placeholder('—'),
                 TextColumn::make('recordedBy.name')->label('Logged by'),
                 TextColumn::make('approval_status')->label('Approval')->badge(),
-                IconColumn::make('open')
-                    ->label('Open')
-                    ->getStateUsing(fn (AssetMaintenanceRecord $record): bool => $record->isOpen())
-                    ->boolean()
-                    ->trueIcon(Heroicon::OutlinedClock)
-                    ->trueColor('warning')
-                    ->falseIcon(Heroicon::OutlinedCheckCircle)
-                    ->falseColor('success'),
-                IconColumn::make('self_approved')
-                    ->label('Self-approved')
-                    ->icon(fn (AssetMaintenanceRecord $record) => $record->isSelfApproved() ? Heroicon::OutlinedExclamationTriangle : null)
-                    ->color('warning')
-                    ->tooltip(fn (AssetMaintenanceRecord $record): ?string => $record->isSelfApproved() ? 'Decided by the same person who logged it' : null),
             ])
             ->recordActions([
                 AssetMaintenanceRecordResource::approveAction(),

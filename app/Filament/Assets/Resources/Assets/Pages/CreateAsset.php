@@ -2,6 +2,7 @@
 
 namespace App\Filament\Assets\Resources\Assets\Pages;
 
+use App\Enums\AssetLifecycleStatus;
 use App\Filament\Assets\Resources\Assets\AssetResource;
 use App\Models\Asset;
 use App\Models\AssetAttachment;
@@ -44,7 +45,7 @@ class CreateAsset extends CreateRecord
         $data['main_sequence'] = $numbers['main_sequence'];
         $data['asset_tag'] = $numbers['asset_tag'];
         $data['public_token'] = $generator->newPublicToken();
-        $data['fund_code'] = $generator->fundCodeFromPoNumber($data['po_number'] ?? null);
+        $data['lifecycle_status'] = AssetLifecycleStatus::Draft->value;
         $data['created_by'] = auth()->id();
 
         return DB::transaction(function () use ($data, $photoPath): Asset {
@@ -63,7 +64,7 @@ class CreateAsset extends CreateRecord
 
             $asset->update(['photo_attachment_id' => $attachment->id]);
 
-            AssetHistory::record($asset->id, 'created', "Asset created as {$asset->asset_tag}.");
+            AssetHistory::record($asset->id, 'created', "Asset created as {$asset->asset_tag} (Draft).");
 
             return $asset;
         });

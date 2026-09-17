@@ -53,12 +53,13 @@ class AssetMaintenanceRecord extends Model
     }
 
     /**
-     * Same "allowed but always shown plainly" rule as
-     * AssetTransferRequest::isSelfApproved() — a user holding both
-     * Admin and Manager may approve/reject their own maintenance log.
+     * "Pending" or "Approved by Jane Doe" — who decided this record, for
+     * the compact log on the asset view.
      */
-    public function isSelfApproved(): bool
+    public function decisionSummary(): string
     {
-        return $this->decided_by !== null && $this->decided_by === $this->recorded_by;
+        return $this->approval_status === AssetMaintenanceApprovalStatus::Pending
+            ? 'Pending'
+            : "{$this->approval_status->getLabel()} by ".($this->decidedBy?->name ?? '—');
     }
 }

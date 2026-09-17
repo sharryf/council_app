@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             InventorySeeder::class,
             AssetCategorySeeder::class,
             AssetSettingSeeder::class,
+            AssetFundCodeSeeder::class,
         ]);
     }
 }

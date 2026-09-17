@@ -61,8 +61,8 @@ class AssetSampleDataSeeder extends Seeder
         ['name' => 'Refrigerator (Double Door)', 'category' => 'Office Equipment and Machinery', 'price' => [7000, 15000]],
         ['name' => 'Smart TV 55"', 'category' => 'Office Equipment and Machinery', 'price' => [8000, 17000]],
         ['name' => 'Photocopier Machine', 'category' => 'Office Equipment and Machinery', 'price' => [15000, 35000]],
-        ['name' => 'Mixer Amplifier (DSPPA)', 'category' => 'Network', 'price' => [4000, 9000]],
-        ['name' => 'Wall Mounted Speaker', 'category' => 'Network', 'price' => [1500, 3500]],
+        ['name' => 'Mixer Amplifier (DSPPA)', 'category' => 'Office Equipment and Machinery', 'price' => [4000, 9000]],
+        ['name' => 'Wall Mounted Speaker', 'category' => 'Office Equipment and Machinery', 'price' => [1500, 3500]],
         ['name' => 'Toyota Hilux Pickup', 'category' => 'Pick up', 'price' => [350000, 550000]],
         ['name' => 'Suzuki Every Van', 'category' => 'Vans', 'price' => [200000, 320000]],
         ['name' => 'Yamaha Speed Boat', 'category' => 'Speed boats', 'price' => [400000, 900000]],
@@ -103,10 +103,9 @@ class AssetSampleDataSeeder extends Seeder
             $room = $rooms->random();
             $purchaseDate = Carbon::instance(fake()->dateTimeBetween('2019-01-01', 'now'));
             $status = fake()->randomElement([
-                ...array_fill(0, 14, AssetStatus::InUse),
-                ...array_fill(0, 2, AssetStatus::InStorage),
-                ...array_fill(0, 2, AssetStatus::UnderRepair),
-                AssetStatus::Retired,
+                ...array_fill(0, 16, AssetStatus::InUse),
+                ...array_fill(0, 2, AssetStatus::Damaged),
+                AssetStatus::Auctioned,
                 AssetStatus::Disposed,
                 AssetStatus::Lost,
             ]);
@@ -144,7 +143,7 @@ class AssetSampleDataSeeder extends Seeder
                 'po_number' => $poNumber,
                 'voucher_number' => $voucherNumber,
                 'donation_reference_no' => $donationReferenceNo,
-                'fund_code' => $generator->fundCodeFromPoNumber($poNumber),
+                'fund_code' => $assetType === 'purchased' ? 'J-GOM' : null,
                 'asset_type' => $assetType,
                 'description' => fake()->boolean(40) ? fake()->sentence(8) : null,
                 'created_by' => $creator->id,

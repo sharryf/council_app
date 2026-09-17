@@ -48,12 +48,13 @@ class AssetTransferRequest extends Model
     }
 
     /**
-     * A user holding both Admin and Manager may approve their own
-     * request — allowed, but always shown plainly (implementation plan
-     * section 4, "Self-approval"), never hidden or blocked.
+     * "Pending" or "Approved by Jane Doe" — who decided this request,
+     * for the compact log on the asset view.
      */
-    public function isSelfApproved(): bool
+    public function decisionSummary(): string
     {
-        return $this->decided_by !== null && $this->decided_by === $this->requested_by;
+        return $this->status === AssetTransferStatus::Pending
+            ? 'Pending'
+            : "{$this->status->getLabel()} by ".($this->decidedBy?->name ?? '—');
     }
 }

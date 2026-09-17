@@ -20,7 +20,7 @@ class AssetAuditSessionsTable
             ->columns([
                 TextColumn::make('name')->label('Name')->searchable()->wrap(),
                 TextColumn::make('scope_type')
-                    ->label('Scope')
+                    ->label('Location')
                     ->formatStateUsing(fn (AssetAuditSession $record): string => $record->scopeDescription()),
                 TextColumn::make('status')->label('Status')->badge(),
                 TextColumn::make('progress')

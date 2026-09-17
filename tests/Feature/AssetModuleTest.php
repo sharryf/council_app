@@ -86,7 +86,9 @@ class AssetModuleTest extends TestCase
             ->fillForm([
                 'photo' => UploadedFile::fake()->image('laptop.jpg'),
                 'name' => 'Dell Laptop',
+                'category_top_id' => $category->parent_id,
                 'category_id' => $category->id,
+                'building_top_id' => $room->building_id,
                 'room_id' => $room->id,
                 'status' => 'in_use',
                 'po_number' => 'PO-1000/J-GOM/2026/0001',

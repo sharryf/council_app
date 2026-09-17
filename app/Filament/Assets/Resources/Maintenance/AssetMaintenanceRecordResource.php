@@ -3,7 +3,6 @@
 namespace App\Filament\Assets\Resources\Maintenance;
 
 use App\Enums\AssetMaintenanceApprovalStatus;
-use App\Enums\AssetStatus;
 use App\Filament\Assets\Concerns\HasAssetRoleAccess;
 use App\Filament\Assets\Resources\Maintenance\Pages\ListAssetMaintenanceRecords;
 use App\Filament\Assets\Resources\Maintenance\Tables\AssetMaintenanceRecordsTable;
@@ -13,14 +12,12 @@ use App\Services\Assets\AssetLock;
 use App\Services\Assets\AssetNotifier;
 use BackedEnum;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Read/decide-only — rows are created exclusively via
@@ -78,8 +75,9 @@ class AssetMaintenanceRecordResource extends Resource
 
     /**
      * Manager-only, validates the RECORD, not the asset's status —
-     * approving never touches assets.status (implementation plan
-     * section 3.6/6.6).
+     * approving never touches assets.status, and now closes the record
+     * automatically in the same step (it no longer needs a separate
+     * Admin close-out once it's approved).
      */
     public static function approveAction(): Action
     {
@@ -88,7 +86,7 @@ class AssetMaintenanceRecordResource extends Resource
             ->icon(Heroicon::OutlinedCheck)
             ->color('success')
             ->requiresConfirmation()
-            ->modalDescription('This validates the record only — it does not change the asset\'s status.')
+            ->modalDescription('This approves and closes the record — it does not change the asset\'s status.')
             ->visible(fn (AssetMaintenanceRecord $record): bool => self::userIsAssetManager()
                 && $record->approval_status === AssetMaintenanceApprovalStatus::Pending)
             ->action(function (AssetMaintenanceRecord $record): void {
@@ -103,21 +101,25 @@ class AssetMaintenanceRecordResource extends Resource
                         'approval_status' => AssetMaintenanceApprovalStatus::Approved,
                         'decided_by' => auth()->id(),
                         'decided_at' => now(),
+                        'closed_at' => now(),
+                        'closed_by' => auth()->id(),
                     ]);
 
                     AssetHistory::record($record->asset_id, 'maintenance_approved', null, 'maintenance_record', $record->id);
+                    AssetHistory::record($record->asset_id, 'maintenance_closed', 'Closed automatically on approval.', 'maintenance_record', $record->id);
 
                     app(AssetNotifier::class)->maintenanceDecided($record->fresh(['asset', 'recordedBy']));
 
-                    Notification::make()->title('Maintenance record approved.')->success()->send();
+                    Notification::make()->title('Maintenance record approved and closed.')->success()->send();
                 });
             });
     }
 
     /**
-     * Rejecting does NOT restore the asset's status — it's already
-     * Under Repair and stays that way until an Admin explicitly closes
-     * it out (implementation plan section 3.6/8.14).
+     * Rejecting does NOT close the record out — it's left open for an
+     * Admin to close manually (via closeAction()) once whatever it
+     * flagged has been dealt with outside the system. Never touches the
+     * asset's status either way.
      */
     public static function rejectAction(): Action
     {
@@ -155,11 +157,10 @@ class AssetMaintenanceRecordResource extends Resource
     }
 
     /**
-     * Admin-only. Allowed regardless of approval_status (spec section
-     * 2.2/3.6 — approval validates the record, closing settles the
-     * asset's status; the two are independent). closing_status defaults
-     * to previous_status but is Admin-overridable (e.g. Retired if
-     * beyond repair) — never auto-restored silently.
+     * Admin-only. Approving already closes a record automatically —
+     * this exists for the one case that doesn't: a rejected record,
+     * left open on purpose for an Admin to close once it's been dealt
+     * with. Never touches the asset's status.
      */
     public static function closeAction(): Action
     {
@@ -167,34 +168,23 @@ class AssetMaintenanceRecordResource extends Resource
             ->label('Close Maintenance')
             ->icon(Heroicon::OutlinedCheckCircle)
             ->color('primary')
+            ->requiresConfirmation()
+            ->modalDescription('This marks the record closed. It does not change the asset\'s status.')
             ->visible(fn (AssetMaintenanceRecord $record): bool => self::userIsAssetAdmin() && $record->isOpen())
-            ->schema(fn (AssetMaintenanceRecord $record) => [
-                Select::make('closing_status')
-                    ->label('Closing status')
-                    ->options(collect(AssetStatus::cases())->mapWithKeys(fn ($s) => [$s->value => $s->getLabel()]))
-                    ->default($record->previous_status->value)
-                    ->required(),
-            ])
-            ->action(function (AssetMaintenanceRecord $record, array $data): void {
-                AssetLock::once("asset-maintenance-record:{$record->id}", function () use ($record, $data) {
+            ->action(function (AssetMaintenanceRecord $record): void {
+                AssetLock::once("asset-maintenance-record:{$record->id}", function () use ($record) {
                     $record->refresh();
 
                     if (! $record->isOpen()) {
                         return;
                     }
 
-                    DB::transaction(function () use ($record, $data) {
-                        $record->asset->update(['status' => $data['closing_status']]);
+                    $record->update([
+                        'closed_at' => now(),
+                        'closed_by' => auth()->id(),
+                    ]);
 
-                        $record->update([
-                            'closing_status' => $data['closing_status'],
-                            'closed_at' => now(),
-                            'closed_by' => auth()->id(),
-                        ]);
-
-                        AssetHistory::recordFieldChange($record->asset_id, 'Status', 'Under Repair', AssetStatus::from($data['closing_status'])->getLabel(), 'status_changed');
-                        AssetHistory::record($record->asset_id, 'maintenance_closed', null, 'maintenance_record', $record->id);
-                    });
+                    AssetHistory::record($record->asset_id, 'maintenance_closed', null, 'maintenance_record', $record->id);
 
                     Notification::make()->title('Maintenance closed.')->success()->send();
                 });

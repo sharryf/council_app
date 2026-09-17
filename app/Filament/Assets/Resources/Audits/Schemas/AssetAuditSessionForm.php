@@ -4,6 +4,7 @@ namespace App\Filament\Assets\Resources\Audits\Schemas;
 
 use App\Enums\AssetAuditScopeType;
 use App\Models\AssetBuilding;
+use App\Models\AssetCategory;
 use App\Models\AssetRoom;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -21,7 +22,7 @@ class AssetAuditSessionForm
                     ->required()
                     ->maxLength(160),
                 Select::make('scope_type')
-                    ->label('Scope')
+                    ->label('Location')
                     ->options(collect(AssetAuditScopeType::cases())->mapWithKeys(fn (AssetAuditScopeType $s): array => [$s->value => $s->getLabel()]))
                     ->default(AssetAuditScopeType::All->value)
                     ->live()
@@ -42,6 +43,20 @@ class AssetAuditSessionForm
                         ->mapWithKeys(fn (AssetRoom $room): array => [$room->id => $room->path()]))
                     ->visible(fn ($get) => $get('scope_type') === AssetAuditScopeType::Room->value)
                     ->required(fn ($get) => $get('scope_type') === AssetAuditScopeType::Room->value)
+                    ->searchable(),
+                // Orthogonal to the location scope above (which says
+                // *where*) — narrows the same scope down to one asset
+                // category, e.g. "Computers", combinable with any of
+                // them. Left blank, every category is included.
+                Select::make('scope_category_id')
+                    ->label('Asset category (optional)')
+                    ->helperText('Leave blank to include every category.')
+                    ->options(fn () => AssetCategory::query()
+                        ->where('is_active', true)
+                        ->with('parent')
+                        ->orderBy('name')
+                        ->get()
+                        ->mapWithKeys(fn (AssetCategory $category): array => [$category->id => $category->path()]))
                     ->searchable(),
             ]);
     }

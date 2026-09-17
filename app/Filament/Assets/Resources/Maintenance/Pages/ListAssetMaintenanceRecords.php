@@ -37,13 +37,6 @@ class ListAssetMaintenanceRecords extends ListRecords
                 ...$tabs];
         }
 
-        if (AssetMaintenanceRecordResource::userIsAssetAdmin()) {
-            $tabs['open'] = Tab::make('Open')
-                ->query(fn ($query) => $query->whereNull('closed_at'))
-                ->badge(fn () => AssetMaintenanceRecord::query()->whereNull('closed_at')->count())
-                ->badgeColor('warning');
-        }
-
         return $tabs;
     }
 

@@ -13,8 +13,8 @@ enum AssetAuditScopeType: string implements HasLabel
     public function getLabel(): string
     {
         return match ($this) {
-            self::All => 'All assets',
-            self::Building => 'One building',
+            self::All => 'All Locations',
+            self::Building => 'One Building',
             self::Room => 'One room',
         };
     }

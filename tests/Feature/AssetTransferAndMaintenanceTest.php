@@ -162,7 +162,7 @@ class AssetTransferAndMaintenanceTest extends TestCase
         $this->assertFalse(AssetTransferRequestResource::approveAction()->record($request)->isVisible());
     }
 
-    public function test_a_manager_who_also_holds_admin_can_approve_their_own_request_and_it_is_flagged(): void
+    public function test_a_manager_who_also_holds_admin_can_approve_their_own_request(): void
     {
         $both = $this->makeUser(AssetRole::Admin);
         $both->assetRoles()->create(['role' => AssetRole::Manager]);
@@ -185,7 +185,6 @@ class AssetTransferAndMaintenanceTest extends TestCase
         $this->invoke(AssetTransferRequestResource::approveAction(), $request);
 
         $this->assertSame(AssetTransferStatus::Approved, $request->fresh()->status);
-        $this->assertTrue($request->fresh()->isSelfApproved());
     }
 
     public function test_approval_is_blocked_if_the_asset_moved_since_the_request_was_made(): void
@@ -265,7 +264,7 @@ class AssetTransferAndMaintenanceTest extends TestCase
 
     // ---- Maintenance ----
 
-    public function test_logging_maintenance_flips_the_asset_to_under_repair(): void
+    public function test_logging_maintenance_does_not_change_the_assets_condition(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
@@ -277,7 +276,7 @@ class AssetTransferAndMaintenanceTest extends TestCase
         ]);
 
         $asset->refresh();
-        $this->assertSame(AssetStatus::UnderRepair, $asset->status);
+        $this->assertSame(AssetStatus::InUse, $asset->status);
 
         $record = AssetMaintenanceRecord::where('asset_id', $asset->id)->firstOrFail();
         $this->assertSame(AssetStatus::InUse, $record->previous_status);
@@ -302,12 +301,11 @@ class AssetTransferAndMaintenanceTest extends TestCase
         $this->assertFalse(AssetResource::logMaintenanceAction()->record($asset->fresh())->isVisible());
     }
 
-    public function test_rejecting_a_maintenance_record_does_not_restore_the_asset_status(): void
+    public function test_rejecting_a_maintenance_record_leaves_it_open_and_never_touches_the_asset_status(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
         $asset = $this->makeAsset($admin);
-        $asset->update(['status' => AssetStatus::UnderRepair]);
 
         $record = AssetMaintenanceRecord::create([
             'asset_id' => $asset->id,
@@ -325,31 +323,61 @@ class AssetTransferAndMaintenanceTest extends TestCase
 
         $record->refresh();
         $this->assertSame(AssetMaintenanceApprovalStatus::Rejected, $record->approval_status);
-        $this->assertSame(AssetStatus::UnderRepair, $asset->fresh()->status);
+        $this->assertSame(AssetStatus::InUse, $asset->fresh()->status);
         $this->assertTrue($record->isOpen());
     }
 
-    public function test_admin_closes_a_maintenance_record_and_the_asset_status_updates(): void
+    public function test_approving_a_maintenance_record_closes_it_automatically_without_touching_the_asset_status(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
         $asset = $this->makeAsset($admin);
-        $asset->update(['status' => AssetStatus::UnderRepair]);
 
         $record = AssetMaintenanceRecord::create([
             'asset_id' => $asset->id,
             'description' => 'Broken wheel',
             'maintenance_date' => now()->toDateString(),
             'previous_status' => AssetStatus::InUse,
-            'approval_status' => AssetMaintenanceApprovalStatus::Approved,
+            'approval_status' => AssetMaintenanceApprovalStatus::Pending,
             'recorded_by' => $admin->id,
         ]);
 
-        $this->invoke(AssetMaintenanceRecordResource::closeAction(), $record, ['closing_status' => AssetStatus::InUse->value]);
+        $manager = $this->makeUser(AssetRole::Manager);
+        $this->actingAs($manager);
+
+        $this->invoke(AssetMaintenanceRecordResource::approveAction(), $record);
+
+        $record->refresh();
+        $this->assertSame(AssetMaintenanceApprovalStatus::Approved, $record->approval_status);
+        $this->assertFalse($record->isOpen());
+        $this->assertSame($manager->id, $record->closed_by);
+        $this->assertSame(AssetStatus::InUse, $asset->fresh()->status);
+        $this->assertFalse(AssetMaintenanceRecordResource::closeAction()->record($record)->isVisible());
+    }
+
+    public function test_admin_closes_a_rejected_maintenance_record_without_changing_the_asset_status(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+        $asset = $this->makeAsset($admin);
+
+        $record = AssetMaintenanceRecord::create([
+            'asset_id' => $asset->id,
+            'description' => 'Broken wheel',
+            'maintenance_date' => now()->toDateString(),
+            'previous_status' => AssetStatus::InUse,
+            'approval_status' => AssetMaintenanceApprovalStatus::Rejected,
+            'recorded_by' => $admin->id,
+            'decided_by' => $admin->id,
+            'decided_at' => now(),
+            'decision_note' => 'Not a valid repair',
+        ]);
+
+        $this->invoke(AssetMaintenanceRecordResource::closeAction(), $record);
 
         $record->refresh();
         $this->assertFalse($record->isOpen());
-        $this->assertSame(AssetStatus::InUse, $record->closing_status);
+        $this->assertSame($admin->id, $record->closed_by);
         $this->assertSame(AssetStatus::InUse, $asset->fresh()->status);
     }
 }

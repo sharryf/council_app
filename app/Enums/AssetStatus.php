@@ -17,9 +17,8 @@ use Filament\Support\Contracts\HasLabel;
 enum AssetStatus: string implements HasColor, HasLabel
 {
     case InUse = 'in_use';
-    case InStorage = 'in_storage';
-    case UnderRepair = 'under_repair';
-    case Retired = 'retired';
+    case Damaged = 'damaged';
+    case Auctioned = 'auctioned';
     case Disposed = 'disposed';
     case Lost = 'lost';
 
@@ -27,9 +26,8 @@ enum AssetStatus: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::InUse => 'In Use',
-            self::InStorage => 'In Storage',
-            self::UnderRepair => 'Under Repair',
-            self::Retired => 'Retired',
+            self::Damaged => 'Damaged',
+            self::Auctioned => 'Auctioned',
             self::Disposed => 'Disposed',
             self::Lost => 'Lost',
         };
@@ -39,20 +37,21 @@ enum AssetStatus: string implements HasColor, HasLabel
     {
         return match ($this) {
             self::InUse => 'success',
-            self::InStorage => 'gray',
-            self::UnderRepair => 'warning',
-            self::Retired => 'muted',
+            self::Damaged => 'warning',
+            self::Auctioned => 'gray',
             self::Disposed => 'gray',
             self::Lost => 'danger',
         };
     }
 
     /**
-     * Disposed is effectively terminal (implementation plan section 8.3) —
-     * block new transfer requests and maintenance records against it.
+     * Disposed and Auctioned both mean the asset has left the
+     * council's possession — block new transfer requests and
+     * maintenance records against either (implementation plan section
+     * 8.3).
      */
     public function isTerminal(): bool
     {
-        return $this === self::Disposed;
+        return $this === self::Disposed || $this === self::Auctioned;
     }
 }

@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'name', 'scope_type', 'scope_building_id', 'scope_room_id', 'status',
+    'name', 'scope_type', 'scope_building_id', 'scope_room_id', 'scope_category_id', 'status',
     'started_by', 'started_at', 'closed_by', 'closed_at',
 ])]
 class AssetAuditSession extends Model
@@ -40,6 +40,11 @@ class AssetAuditSession extends Model
         return $this->belongsTo(AssetRoom::class, 'scope_room_id');
     }
 
+    public function scopeCategory(): BelongsTo
+    {
+        return $this->belongsTo(AssetCategory::class, 'scope_category_id');
+    }
+
     public function startedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'started_by');
@@ -57,10 +62,14 @@ class AssetAuditSession extends Model
 
     public function scopeDescription(): string
     {
-        return match ($this->scope_type) {
-            AssetAuditScopeType::All => 'All assets',
+        $location = match ($this->scope_type) {
+            AssetAuditScopeType::All => 'All Locations',
             AssetAuditScopeType::Building => $this->scopeBuilding?->name ?? 'Building',
             AssetAuditScopeType::Room => $this->scopeRoom?->path() ?? 'Room',
         };
+
+        return $this->scope_category_id === null
+            ? $location
+            : "{$location} · {$this->scopeCategory?->path()}";
     }
 }

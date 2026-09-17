@@ -3,11 +3,11 @@
 namespace Tests\Feature;
 
 use App\Enums\AssetAuditOutcome;
-use App\Enums\AssetAuditReviewAction;
 use App\Enums\AssetAuditScopeType;
 use App\Enums\AssetAuditSessionStatus;
 use App\Enums\AssetRole;
 use App\Enums\AssetStatus;
+use App\Enums\AssetTransferStatus;
 use App\Filament\Assets\Resources\Audits\Pages\CreateAssetAuditSession;
 use App\Filament\Assets\Resources\Audits\Pages\ViewAssetAuditSession;
 use App\Models\Asset;
@@ -16,6 +16,7 @@ use App\Models\AssetAuditSession;
 use App\Models\AssetBuilding;
 use App\Models\AssetCategory;
 use App\Models\AssetRoom;
+use App\Models\AssetTransferRequest;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -51,9 +52,9 @@ class AssetAuditTest extends TestCase
         return AssetRoom::create(['building_id' => $building->id, 'name' => $roomName, 'is_active' => true]);
     }
 
-    private function makeAsset(User $creator, AssetRoom $room, AssetStatus $status = AssetStatus::InUse, string $name = 'Office Chair'): Asset
+    private function makeAsset(User $creator, AssetRoom $room, AssetStatus $status = AssetStatus::InUse, string $name = 'Office Chair', ?AssetCategory $category = null): Asset
     {
-        $category = AssetCategory::firstOrCreate(['name' => 'Furniture'], ['is_active' => true]);
+        $category ??= AssetCategory::firstOrCreate(['name' => 'Furniture'], ['is_active' => true]);
 
         return Asset::create([
             'asset_tag' => 'AST-'.random_int(100000, 999999),
@@ -109,6 +110,53 @@ class AssetAuditTest extends TestCase
 
         $this->assertTrue($assetIds->contains($inRoomA->id));
         $this->assertFalse($assetIds->contains($inRoomB->id));
+    }
+
+    public function test_a_category_scoped_session_only_snapshots_assets_in_that_category(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+
+        $room = $this->makeRoom('Main Office', 'Room 101');
+        $computers = AssetCategory::create(['name' => 'Computers', 'is_active' => true]);
+        $computer = $this->makeAsset($admin, $room, name: 'Laptop', category: $computers);
+        $chair = $this->makeAsset($admin, $room, name: 'Chair');
+
+        Livewire::test(CreateAssetAuditSession::class)
+            ->fillForm(['name' => 'Computers Audit', 'scope_type' => AssetAuditScopeType::All->value, 'scope_category_id' => $computers->id])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $session = AssetAuditSession::firstOrFail();
+        $assetIds = AssetAuditItem::where('session_id', $session->id)->pluck('asset_id');
+
+        $this->assertTrue($assetIds->contains($computer->id));
+        $this->assertFalse($assetIds->contains($chair->id));
+    }
+
+    public function test_a_category_scope_combines_with_a_room_scope(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+
+        $roomA = $this->makeRoom('Main Office', 'Room 101');
+        $roomB = $this->makeRoom('Main Office', 'Room 202');
+        $computers = AssetCategory::create(['name' => 'Computers', 'is_active' => true]);
+        $computerInRoomA = $this->makeAsset($admin, $roomA, name: 'Laptop A', category: $computers);
+        $computerInRoomB = $this->makeAsset($admin, $roomB, name: 'Laptop B', category: $computers);
+        $chairInRoomA = $this->makeAsset($admin, $roomA, name: 'Chair A');
+
+        Livewire::test(CreateAssetAuditSession::class)
+            ->fillForm(['name' => 'Room + Category Audit', 'scope_type' => AssetAuditScopeType::Room->value, 'scope_room_id' => $roomA->id, 'scope_category_id' => $computers->id])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $session = AssetAuditSession::firstOrFail();
+        $assetIds = AssetAuditItem::where('session_id', $session->id)->pluck('asset_id');
+
+        $this->assertTrue($assetIds->contains($computerInRoomA->id));
+        $this->assertFalse($assetIds->contains($computerInRoomB->id));
+        $this->assertFalse($assetIds->contains($chairInRoomA->id));
     }
 
     public function test_only_one_in_progress_session_is_allowed(): void
@@ -250,51 +298,63 @@ class AssetAuditTest extends TestCase
         $this->assertSame(AssetAuditSessionStatus::Closed, $session->fresh()->status);
     }
 
-    public function test_reviewing_marked_lost_updates_the_asset_status_and_history(): void
+    public function test_found_in_another_room_verifies_the_item_and_raises_a_pending_transfer_request_without_moving_the_asset(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
-        $room = $this->makeRoom('Main Office', 'Room 101');
-        $asset = $this->makeAsset($admin, $room);
+        $expectedRoom = $this->makeRoom('Main Office', 'Room 101');
+        $foundRoom = $this->makeRoom('Main Office', 'Room 202');
+        $asset = $this->makeAsset($admin, $expectedRoom);
 
         $session = AssetAuditSession::create([
-            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::Closed,
-            'started_by' => $admin->id, 'started_at' => now(), 'closed_by' => $admin->id, 'closed_at' => now(),
+            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::InProgress,
+            'started_by' => $admin->id, 'started_at' => now(),
         ]);
-        $item = AssetAuditItem::create([
-            'session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $room->id,
-            'outcome' => AssetAuditOutcome::Missing,
-        ]);
+        $item = AssetAuditItem::create(['session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $expectedRoom->id]);
 
         Livewire::test(ViewAssetAuditSession::class, ['record' => $session->getKey()])
-            ->call('reviewItem', $item->id, AssetAuditReviewAction::MarkedLost->value, 'Confirmed missing after search');
+            ->call('foundInAnotherRoom', $item->id, $foundRoom->id);
 
-        $this->assertSame(AssetStatus::Lost, $asset->fresh()->status);
         $freshItem = $item->fresh();
-        $this->assertSame(AssetAuditReviewAction::MarkedLost, $freshItem->review_action);
-        $this->assertNotNull($freshItem->reviewed_at);
+        $this->assertNotNull($freshItem->verified_at);
+        $this->assertSame($foundRoom->id, $freshItem->found_room_id);
+
+        // The asset itself is never touched directly — only a pending
+        // request exists, same as a normal Change Location request.
+        $this->assertSame($expectedRoom->id, $asset->fresh()->room_id);
+        $this->assertSame(AssetStatus::InUse, $asset->fresh()->status);
+
+        $request = AssetTransferRequest::where('asset_id', $asset->id)->firstOrFail();
+        $this->assertSame(AssetTransferStatus::Pending, $request->status);
+        $this->assertSame($expectedRoom->id, $request->from_room_id);
+        $this->assertSame($foundRoom->id, $request->to_room_id);
+        $this->assertSame('Found in audit', $request->reason);
+        $this->assertSame($admin->id, $request->requested_by);
     }
 
-    public function test_reviewing_kept_as_is_does_not_change_the_asset(): void
+    public function test_closing_a_session_leaves_unverified_items_as_not_found_with_no_review_action_available(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
         $room = $this->makeRoom('Main Office', 'Room 101');
-        $asset = $this->makeAsset($admin, $room);
+        $asset = $this->makeAsset($admin, $room, name: 'Missing Chair');
 
         $session = AssetAuditSession::create([
-            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::Closed,
-            'started_by' => $admin->id, 'started_at' => now(), 'closed_by' => $admin->id, 'closed_at' => now(),
+            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::InProgress,
+            'started_by' => $admin->id, 'started_at' => now(),
         ]);
-        $item = AssetAuditItem::create([
-            'session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $room->id,
-            'outcome' => AssetAuditOutcome::Missing,
-        ]);
+        $item = AssetAuditItem::create(['session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $room->id]);
 
         Livewire::test(ViewAssetAuditSession::class, ['record' => $session->getKey()])
-            ->call('reviewItem', $item->id, AssetAuditReviewAction::KeptAsIs->value);
+            ->call('closeSession');
 
+        $freshItem = $item->fresh();
+        $this->assertSame(AssetAuditOutcome::Missing, $freshItem->outcome);
+        $this->assertSame('Not Found in this Audit', $freshItem->outcome->getLabel());
+
+        // No review mechanism exists any more — nothing was ever set on
+        // this item beyond its outcome, and the asset is untouched.
         $this->assertSame(AssetStatus::InUse, $asset->fresh()->status);
-        $this->assertSame(AssetAuditReviewAction::KeptAsIs, $item->fresh()->review_action);
+        $this->assertFalse(method_exists(ViewAssetAuditSession::class, 'reviewItem'));
     }
 }

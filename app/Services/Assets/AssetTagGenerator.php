@@ -60,21 +60,4 @@ class AssetTagGenerator
     {
         return Str::random(32);
     }
-
-    /**
-     * The fund code segment sits between the PO number's first two
-     * "/"s, e.g. "J-GOM" out of "PO-1359/J-GOM/2023/0012" — read
-     * automatically rather than typed twice, since the PO number
-     * already carries it.
-     */
-    public function fundCodeFromPoNumber(?string $poNumber): ?string
-    {
-        if (blank($poNumber)) {
-            return null;
-        }
-
-        $segments = explode('/', $poNumber);
-
-        return $segments[1] ?? null;
-    }
 }

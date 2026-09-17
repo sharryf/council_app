@@ -4,6 +4,8 @@ namespace App\Filament\Assets\Pages;
 
 use App\Filament\Assets\Widgets\AssetStatsWidget;
 use App\Filament\Assets\Widgets\OpenAuditWidget;
+use App\Filament\Assets\Widgets\PendingDeleteRequestsWidget;
+use App\Filament\Assets\Widgets\PendingEditRequestsWidget;
 use App\Filament\Assets\Widgets\PendingMaintenanceWidget;
 use App\Filament\Assets\Widgets\PendingTransfersWidget;
 use Filament\Pages\Dashboard as BaseDashboard;
@@ -22,6 +24,8 @@ class Dashboard extends BaseDashboard
         return [
             PendingTransfersWidget::class,
             PendingMaintenanceWidget::class,
+            PendingEditRequestsWidget::class,
+            PendingDeleteRequestsWidget::class,
             OpenAuditWidget::class,
             AssetStatsWidget::class,
         ];

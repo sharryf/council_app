@@ -5,7 +5,9 @@ namespace App\Filament\Assets\Resources\Assets\Schemas;
 use App\Enums\AssetAcquisitionType;
 use App\Enums\AssetStatus;
 use App\Models\Asset;
+use App\Models\AssetBuilding;
 use App\Models\AssetCategory;
+use App\Models\AssetFundCode;
 use App\Models\AssetRoom;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -20,9 +22,20 @@ class AssetForm
     public static function configure(Schema $schema): Schema
     {
         return $schema
+            ->columns(1)
             ->components([
+                // Once an asset is Posted, EditAsset routes a submission
+                // here into an AssetEditRequest instead of saving
+                // directly — this reason is what the Manager reviewing
+                // it sees, so it's asked for up front rather than as an
+                // afterthought.
+                Textarea::make('edit_reason')
+                    ->label('Reason for this edit')
+                    ->helperText('This asset is posted — changes need a Manager\'s approval before they apply.')
+                    ->rows(2)
+                    ->visible(fn (?Asset $record): bool => $record?->isPosted() ?? false)
+                    ->required(fn (?Asset $record): bool => $record?->isPosted() ?? false),
                 Section::make('Identification')
-                    ->columns(2)
                     ->components([
                         TextInput::make('asset_tag')
                             ->label('Asset tag')
@@ -34,28 +47,54 @@ class AssetForm
                             ->label('Name')
                             ->required()
                             ->maxLength(200),
-                        Select::make('category_id')
-                            ->label('Category')
-                            ->helperText('Optional — can be assigned later. Only categories with an asset class code can be assigned; it feeds the auto-generated inventory number below.')
+                        // A two-step cascade — Main category (a
+                        // top-level AssetCategory) then Sub category
+                        // (its children, the only ones that ever carry
+                        // an asset class code) — rather than one flat
+                        // list of ~110 pre-joined "Parent > Child"
+                        // options. category_top_id isn't a real column;
+                        // it only exists to filter the second select
+                        // and is never dehydrated.
+                        Select::make('category_top_id')
+                            ->label('Main category')
                             ->options(fn () => AssetCategory::query()
+                                ->whereNull('parent_id')
+                                ->where('is_active', true)
+                                ->orderBy('name')
+                                ->pluck('name', 'id'))
+                            ->searchable()
+                            ->live()
+                            ->required()
+                            ->dehydrated(false)
+                            ->afterStateHydrated(function ($component, ?Asset $record): void {
+                                if ($record?->category?->parent_id) {
+                                    $component->state($record->category->parent_id);
+                                }
+                            })
+                            ->afterStateUpdated(fn ($set) => $set('category_id', null)),
+                        Select::make('category_id')
+                            ->label('Sub category')
+                            ->helperText('Its asset class code feeds the auto-generated inventory number below.')
+                            ->options(fn ($get): array => AssetCategory::query()
+                                ->where('parent_id', $get('category_top_id'))
                                 ->where('is_active', true)
                                 ->whereNotNull('asset_class_code')
-                                ->with('parent')
                                 ->orderBy('name')
                                 ->get()
-                                ->mapWithKeys(fn (AssetCategory $category): array => [$category->id => $category->path()]))
+                                ->mapWithKeys(fn (AssetCategory $category): array => [$category->id => "{$category->name} ({$category->asset_class_code})"])
+                                ->all())
+                            ->visible(fn ($get): bool => filled($get('category_top_id')))
+                            ->required()
                             ->searchable(),
                         TextInput::make('brand')->label('Brand')->maxLength(120),
                         TextInput::make('model')->label('Model')->maxLength(120),
                         TextInput::make('serial_number')->label('Serial number')->maxLength(120),
                         Textarea::make('description')
                             ->label('Description / Notes')
-                            ->rows(2)
-                            ->columnSpanFull(),
+                            ->rows(2),
                     ]),
 
                 Section::make('Financial')
-                    ->columns(2)
                     ->components([
                         DatePicker::make('purchase_date')
                             ->label('Purchase date')
@@ -64,11 +103,10 @@ class AssetForm
                             ->label('Purchase price')
                             ->numeric()
                             ->prefix('MVR'),
-                        TextInput::make('vendor')->label('Vendor / Supplier')->maxLength(200)->columnSpanFull(),
+                        TextInput::make('vendor')->label('Vendor / Supplier')->maxLength(200),
                     ]),
 
                 Section::make('Register Details')
-                    ->columns(2)
                     ->components([
                         Select::make('asset_type')
                             ->label('Asset type')
@@ -76,14 +114,23 @@ class AssetForm
                             ->default(AssetAcquisitionType::Purchased->value)
                             ->required()
                             ->live(),
+                        Select::make('fund_code')
+                            ->label('Fund code')
+                            ->options(fn () => AssetFundCode::query()
+                                ->where('is_active', true)
+                                ->orderBy('code')
+                                ->get()
+                                ->mapWithKeys(fn (AssetFundCode $fundCode): array => [$fundCode->code => $fundCode->label()]))
+                            ->searchable(),
                         TextInput::make('po_number')
                             ->label('PO number')
-                            ->helperText('e.g. PO-1359/J-GOM/2023/0012 — the fund code segment (between the first two "/"s) is read automatically.')
+                            ->helperText('e.g. PO-1359/J-GOM/2026/0166')
                             ->maxLength(80)
                             ->visible(fn ($get): bool => $get('asset_type') === AssetAcquisitionType::Purchased->value)
                             ->required(fn ($get): bool => $get('asset_type') === AssetAcquisitionType::Purchased->value),
                         TextInput::make('voucher_number')
                             ->label('Voucher number')
+                            ->helperText('e.g. PV-1359/J-GOM/2026/0083')
                             ->maxLength(80)
                             ->visible(fn ($get): bool => $get('asset_type') === AssetAcquisitionType::Purchased->value)
                             ->required(fn ($get): bool => $get('asset_type') === AssetAcquisitionType::Purchased->value),
@@ -95,26 +142,48 @@ class AssetForm
                     ]),
 
                 Section::make('Location & Status')
-                    ->columns(2)
                     ->components([
+                        // Same Main/Sub cascade shape as category above
+                        // — building_top_id is a synthetic filter field,
+                        // never dehydrated. Freely editable while the
+                        // asset is a Draft, same as everything else on
+                        // this form; once Posted, a room move must go
+                        // through Request Transfer instead — locked
+                        // (not just hidden) here so a direct edit can't
+                        // bypass that approval.
+                        Select::make('building_top_id')
+                            ->label('Building')
+                            ->helperText(fn (?Asset $record): ?string => $record?->isPosted()
+                                ? 'This asset is posted — use Change Location instead of editing this directly.'
+                                : null)
+                            ->options(fn () => AssetBuilding::query()
+                                ->where('is_active', true)
+                                ->orderBy('name')
+                                ->pluck('name', 'id'))
+                            ->searchable()
+                            ->live()
+                            ->required()
+                            ->dehydrated(false)
+                            ->disabled(fn (?Asset $record): bool => $record?->isPosted() ?? false)
+                            ->afterStateHydrated(function ($component, ?Asset $record): void {
+                                if ($record?->room?->building_id) {
+                                    $component->state($record->room->building_id);
+                                }
+                            })
+                            ->afterStateUpdated(fn ($set) => $set('room_id', null)),
                         Select::make('room_id')
                             ->label('Room')
-                            ->helperText('Shown as "Building > Room". To move an asset once created, use Request Transfer instead of editing this directly.')
-                            ->options(fn () => AssetRoom::query()
+                            ->options(fn ($get): array => AssetRoom::query()
+                                ->where('building_id', $get('building_top_id'))
                                 ->where('is_active', true)
-                                ->with('building')
                                 ->orderBy('name')
-                                ->get()
-                                ->mapWithKeys(fn (AssetRoom $room): array => [$room->id => $room->path()]))
+                                ->pluck('name', 'id')
+                                ->all())
+                            ->visible(fn ($get): bool => filled($get('building_top_id')))
                             ->required()
                             ->searchable()
-                            // BR-5: editing an asset with a pending
-                            // transfer is allowed, but room_id must go
-                            // through the transfer flow — disabled once
-                            // the asset exists at all, since direct
-                            // edits here would bypass approval entirely.
-                            ->disabled(fn (?Asset $record): bool => $record !== null)
-                            ->dehydrated(fn (?Asset $record): bool => $record === null),
+                            ->disabled(fn (?Asset $record): bool => $record?->isPosted() ?? false)
+                            ->dehydrated(fn (?Asset $record): bool => ! ($record?->isPosted() ?? false)),
                         Select::make('status')
                             ->label('Status')
                             ->options(collect(AssetStatus::cases())->mapWithKeys(fn (AssetStatus $status): array => [$status->value => $status->getLabel()]))
@@ -124,18 +193,30 @@ class AssetForm
 
                 // Deliberately last, not first — the register fields
                 // above are quick to fill in without a file ready to
-                // hand; the photo can be added once one is.
+                // hand; the photo can be added once one is. Same
+                // Draft-applies-immediately / Posted-needs-approval
+                // split as every other field here — EditAsset pulls
+                // 'photo' out of $data before the usual diff and routes
+                // it through Asset::replacePhoto() itself, either right
+                // away (Draft) or once a Manager approves (Posted).
                 FileUpload::make('photo')
                     ->label(fn (?Asset $record): string => $record ? 'Replace photo' : 'Photo')
-                    ->helperText('Required. JPEG, PNG, or WebP — used to visually identify this asset in lists.')
+                    ->helperText(function (?Asset $record): string {
+                        if ($record === null) {
+                            return 'Required. JPEG, PNG, or WebP — used to visually identify this asset in lists.';
+                        }
+
+                        return $record->isPosted()
+                            ? 'Optional — leave blank to keep the current photo. Uploading a new one needs a Manager\'s approval, like any other change here.'
+                            : 'Optional — leave blank to keep the current photo. JPEG, PNG, or WebP.';
+                    })
                     ->image()
                     ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                     ->maxSize(10 * 1024)
                     ->disk('local')
                     ->directory('assets/photos')
                     ->visibility('private')
-                    ->required(fn (?Asset $record): bool => $record === null)
-                    ->columnSpanFull(),
+                    ->required(fn (?Asset $record): bool => $record === null),
             ]);
     }
 }

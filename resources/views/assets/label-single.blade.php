@@ -15,8 +15,8 @@
             align-items: center;
             padding: 24px;
         }
-        .toolbar { margin-bottom: 16px; }
-        .toolbar button {
+        .toolbar { margin-bottom: 16px; display: flex; gap: 8px; }
+        .toolbar button, .toolbar a {
             padding: 8px 16px;
             border-radius: 6px;
             border: none;
@@ -24,6 +24,13 @@
             color: #fff;
             font-size: 14px;
             cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .toolbar a.secondary {
+            background: transparent;
+            border: 1px solid #999;
+            color: #333;
         }
         .label {
             width: 62mm;
@@ -64,6 +71,7 @@
 <body>
     <div class="toolbar">
         <button onclick="window.print()">Print</button>
+        <a class="secondary" href="{{ route('assets.qr', $asset) }}">Download QR only</a>
     </div>
     <div class="label">
         <img src="{{ $qrDataUri }}" alt="QR code">

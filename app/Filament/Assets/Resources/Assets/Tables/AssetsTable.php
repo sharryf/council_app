@@ -2,6 +2,7 @@
 
 namespace App\Filament\Assets\Resources\Assets\Tables;
 
+use App\Enums\AssetLifecycleStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetTransferStatus;
 use App\Filament\Assets\Resources\Assets\AssetResource;
@@ -11,7 +12,6 @@ use App\Models\AssetCategory;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Actions\EditAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
@@ -32,34 +32,49 @@ class AssetsTable
                 'room.building',
                 'transferRequests' => fn ($q) => $q->where('status', AssetTransferStatus::Pending),
             ]))
+            ->recordUrl(fn (Asset $record): string => AssetResource::getUrl('view', ['record' => $record]))
             ->columns([
+                // Tag, Name, Category, Asset Class Code, Location,
+                // Status are the only columns visible by default —
+                // everything else (photo, register status, transfer
+                // flag, purchase date, type) is still available via the
+                // column toggle, just not shown up front.
                 ImageColumn::make('photo_attachment_id')
                     ->label('')
                     ->getStateUsing(fn (Asset $record): ?string => $record->photo_attachment_id
                         ? route('assets.attachments.show', $record->photo_attachment_id)
                         : null)
                     ->size(40)
-                    ->circular(false),
+                    ->circular(false)
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('asset_tag')->label('Tag')->searchable()->sortable(),
                 TextColumn::make('name')
                     ->label('Name')
                     ->searchable(['name', 'serial_number'])
                     ->sortable()
                     ->wrap(),
-                TextColumn::make('category.name')
+                TextColumn::make('category.parent.name')
                     ->label('Category')
-                    ->formatStateUsing(fn (Asset $record): string => $record->category?->path() ?? '—'),
-                TextColumn::make('room.name')
+                    ->formatStateUsing(fn (Asset $record): string => $record->category?->parent?->name ?? $record->category?->name ?? '—'),
+                TextColumn::make('category.asset_class_code')
+                    ->label('Code')
+                    ->placeholder('—'),
+                TextColumn::make('room.building.name')
                     ->label('Location')
-                    ->formatStateUsing(fn (Asset $record): string => $record->room?->path() ?? '—'),
+                    ->formatStateUsing(fn (Asset $record): string => $record->room?->building?->name ?? '—'),
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge(),
+                TextColumn::make('lifecycle_status')
+                    ->label('Register')
+                    ->badge()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('transfer_pending')
                     ->label('')
                     ->state(fn (Asset $record): ?string => $record->hasPendingTransfer() ? 'Transfer Pending' : null)
                     ->badge()
-                    ->color('warning'),
+                    ->color('warning')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('purchase_date')
                     ->label('Purchased')
                     ->date()
@@ -79,6 +94,9 @@ class AssetsTable
                     ->label('Status')
                     ->options(collect(AssetStatus::cases())->mapWithKeys(fn (AssetStatus $status): array => [$status->value => $status->getLabel()]))
                     ->multiple(),
+                SelectFilter::make('lifecycle_status')
+                    ->label('Register status')
+                    ->options(collect(AssetLifecycleStatus::cases())->mapWithKeys(fn (AssetLifecycleStatus $s): array => [$s->value => $s->getLabel()])),
                 SelectFilter::make('room.building_id')
                     ->label('Building')
                     ->options(fn () => AssetBuilding::query()->orderBy('name')->pluck('name', 'id'))
@@ -96,10 +114,6 @@ class AssetsTable
                         ->when($data['purchased_to'] ?? null, fn (Builder $q, $date) => $q->whereDate('purchase_date', '<=', $date))),
             ])
             ->persistFiltersInSession()
-            ->recordActions([
-                EditAction::make()
-                    ->visible(fn (Asset $record): bool => AssetResource::canEdit($record)),
-            ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     // Bulk label printing matters when tagging ~500

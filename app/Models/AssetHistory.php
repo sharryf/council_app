@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * Append-only timeline for one asset — never updated or deleted. Unlike
@@ -82,5 +83,45 @@ class AssetHistory extends Model
             'performed_by' => auth()->id(),
             'created_at' => now(),
         ]);
+    }
+
+    /**
+     * One human-readable line per row, for the compact log on the asset
+     * view — e.g. "Status: In Use → Damaged" or "Location change
+     * approved". Values are already display-ready strings (see
+     * recordFieldChange's docblock), so this never needs to resolve
+     * anything further.
+     */
+    public function summary(): string
+    {
+        $label = match ($this->event_type) {
+            'field_changed' => trim("{$this->field_name}: ".($this->old_value ?? '—').' → '.($this->new_value ?? '—')),
+            'created' => 'Created',
+            'posted' => 'Posted',
+            'transfer_requested' => 'Location change requested',
+            'transfer_approved' => 'Location change approved',
+            'transfer_rejected' => 'Location change rejected',
+            'transfer_cancelled' => 'Location change cancelled',
+            'edit_requested' => 'Edit requested',
+            'edit_approved' => 'Edit approved',
+            'edit_rejected' => 'Edit rejected',
+            'delete_requested' => 'Deletion requested',
+            'delete_approved' => 'Deletion approved',
+            'delete_rejected' => 'Deletion rejected',
+            'maintenance_logged' => 'Maintenance logged',
+            'maintenance_approved' => 'Maintenance approved',
+            'maintenance_rejected' => 'Maintenance rejected',
+            'maintenance_closed' => 'Maintenance closed',
+            'photo_replaced' => 'Photo replaced',
+            'attachment_added' => 'Document added',
+            'audit_verified' => 'Verified in audit',
+            'audit_flagged_missing' => 'Flagged missing in audit',
+            'audit_reviewed' => 'Reviewed in audit',
+            default => Str::headline($this->event_type),
+        };
+
+        $note = $this->event_type === 'field_changed' ? null : $this->note;
+
+        return implode(' — ', array_filter([$label, $note]));
     }
 }

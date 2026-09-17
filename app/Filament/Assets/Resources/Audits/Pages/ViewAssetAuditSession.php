@@ -3,17 +3,20 @@
 namespace App\Filament\Assets\Resources\Audits\Pages;
 
 use App\Enums\AssetAuditOutcome;
-use App\Enums\AssetAuditReviewAction;
 use App\Enums\AssetAuditScopeType;
 use App\Enums\AssetAuditSessionStatus;
 use App\Enums\AssetAuditVerifyMethod;
-use App\Enums\AssetStatus;
+use App\Enums\AssetTransferStatus;
 use App\Filament\Assets\Resources\Audits\AssetAuditSessionResource;
 use App\Models\Asset;
 use App\Models\AssetAuditItem;
 use App\Models\AssetAuditSession;
+use App\Models\AssetBuilding;
 use App\Models\AssetHistory;
+use App\Models\AssetRoom;
+use App\Models\AssetTransferRequest;
 use App\Services\Assets\AssetLock;
+use App\Services\Assets\AssetNotifier;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
@@ -30,7 +33,15 @@ use Illuminate\Support\Facades\DB;
  * convention of sticking to built-in browser APIs, e.g.
  * record-minutes.blade.php's MediaRecorder usage) or by ticking the
  * manual checklist, then close the session (computing every item's
- * outcome) and work through the review queue.
+ * outcome).
+ *
+ * An audit never edits an asset's condition or room directly — the
+ * closest it comes is foundInAnotherRoom(), which raises an ordinary
+ * AssetTransferRequest (reason "Found in audit") for a Manager to
+ * decide, same as every other room change in this module. There's no
+ * post-close review queue: an item left unverified when the session
+ * closes is simply tagged AssetAuditOutcome::Missing ("Not Found in
+ * this Audit") and that's the end of it.
  *
  * Not built: true offline queueing (spec's "queue verifications
  * locally and sync when connectivity returns") — this app has no
@@ -52,9 +63,26 @@ class ViewAssetAuditSession extends Page
 
     public string $search = '';
 
+    // A Room-scoped session is already narrowed to one room, so neither
+    // filter applies there — only All/Building scope spans more than
+    // one location worth narrowing further on the checklist.
+    public ?int $filterBuildingId = null;
+
+    public ?int $filterRoomId = null;
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
+    }
+
+    /**
+     * Filament's default "View {model label}" heading reads oddly here
+     * ("View Asset Audit Session") — the session's own name is already
+     * shown prominently in the page body, so this just drops "View".
+     */
+    public function getTitle(): string
+    {
+        return 'Asset Audit Session';
     }
 
     protected function getHeaderActions(): array
@@ -86,13 +114,14 @@ class ViewAssetAuditSession extends Page
      */
     public function items(): Collection
     {
+        $session = $this->getSession();
+
         $query = AssetAuditItem::query()
-            ->where('session_id', $this->getSession()->id)
+            ->where('session_id', $session->id)
             ->with(['asset', 'expectedRoom.building', 'foundRoom.building']);
 
         $query = match ($this->tab) {
             'verified' => $query->whereNotNull('verified_at'),
-            'review' => $query->whereNotNull('outcome')->where('outcome', '!=', AssetAuditOutcome::Verified)->whereNull('review_action'),
             default => $query->whereNull('verified_at'),
         };
 
@@ -102,11 +131,97 @@ class ViewAssetAuditSession extends Page
                 ->orWhere('asset_tag', 'like', "%{$this->search}%"));
         }
 
+        if ($session->scope_type === AssetAuditScopeType::All && $this->filterBuildingId) {
+            $query->whereHas('expectedRoom', fn ($q) => $q->where('building_id', $this->filterBuildingId));
+        }
+
+        // Available (and applied) on both All and Building scope — a
+        // Room-scoped session is the only one already narrow enough not
+        // to need it.
+        if ($this->filterRoomId) {
+            $query->where('expected_room_id', $this->filterRoomId);
+        }
+
         return $query->get();
     }
 
     /**
-     * @return array{verified: int, total: int, review_remaining: int}
+     * A previously-picked room may not belong to the newly-picked
+     * building, so it's cleared alongside — wire:click can only call
+     * one method, hence this wrapping both $set()s the Blade view would
+     * otherwise need to chain.
+     */
+    public function selectFilterBuilding(?int $buildingId): void
+    {
+        $this->filterBuildingId = $buildingId;
+        $this->filterRoomId = null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function filterBuildingOptions(): array
+    {
+        return AssetBuilding::query()->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    /**
+     * Building scope: every room in that one building (name only — the
+     * building is already implied). All scope: every room, further
+     * narrowed to the selected building filter when one is picked, and
+     * labelled with its building path since it isn't implied here.
+     *
+     * @return array<int, string>
+     */
+    public function filterRoomOptions(): array
+    {
+        $session = $this->getSession();
+
+        if ($session->scope_type === AssetAuditScopeType::Building) {
+            return AssetRoom::query()
+                ->where('building_id', $session->scope_building_id)
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->pluck('name', 'id')
+                ->all();
+        }
+
+        return AssetRoom::query()
+            ->where('is_active', true)
+            ->when($this->filterBuildingId, fn ($q) => $q->where('building_id', $this->filterBuildingId))
+            ->with('building')
+            ->orderBy('name')
+            ->get()
+            ->mapWithKeys(fn (AssetRoom $room): array => [$room->id => $room->path()])
+            ->all();
+    }
+
+    /**
+     * Every active room the "Found in Another Room" button can offer
+     * for one item — the asset's own current room is excluded, same as
+     * AssetResource::requestTransferAction()'s own room picker (no
+     * point "moving" it to where it already is).
+     *
+     * @return array<int, string>
+     */
+    public function foundInRoomOptions(AssetAuditItem $item): array
+    {
+        if (! $item->asset) {
+            return [];
+        }
+
+        return AssetRoom::query()
+            ->where('is_active', true)
+            ->whereKeyNot($item->asset->room_id)
+            ->with('building')
+            ->orderBy('name')
+            ->get()
+            ->mapWithKeys(fn (AssetRoom $room): array => [$room->id => $room->path()])
+            ->all();
+    }
+
+    /**
+     * @return array{verified: int, total: int}
      */
     public function progress(): array
     {
@@ -115,9 +230,6 @@ class ViewAssetAuditSession extends Page
         return [
             'verified' => AssetAuditItem::where('session_id', $session->id)->whereNotNull('verified_at')->count(),
             'total' => AssetAuditItem::where('session_id', $session->id)->count(),
-            'review_remaining' => AssetAuditItem::where('session_id', $session->id)
-                ->whereNotNull('outcome')->where('outcome', '!=', AssetAuditOutcome::Verified)->whereNull('review_action')
-                ->count(),
         ];
     }
 
@@ -188,6 +300,12 @@ class ViewAssetAuditSession extends Page
 
     private function markVerified(AssetAuditItem $item, AssetAuditVerifyMethod $method): void
     {
+        if (! $item->asset) {
+            Notification::make()->title('This asset no longer exists and cannot be verified.')->danger()->send();
+
+            return;
+        }
+
         if ($item->isVerified()) {
             Notification::make()->title("Already verified: {$item->asset->name}")->success()->send();
 
@@ -199,9 +317,11 @@ class ViewAssetAuditSession extends Page
         // The audit only has a "current room" signal when it's scoped
         // to one specific room — if the asset's expected room differs
         // from where the audit is physically happening, that's a
-        // location mismatch, captured with no extra input needed. For
-        // All/Building-scoped sessions there's no single "current
-        // room," so no mismatch signal is captured at verify time.
+        // location mismatch, captured with no extra input needed (and
+        // purely informational — see foundInAnotherRoom() for the
+        // action a mismatch actually needs). For All/Building-scoped
+        // sessions there's no single "current room," so no mismatch
+        // signal is captured at plain-verify time.
         $foundRoomId = $session->scope_type === AssetAuditScopeType::Room
             ? $session->scope_room_id
             : $item->expected_room_id;
@@ -223,6 +343,79 @@ class ViewAssetAuditSession extends Page
         AssetHistory::record($item->asset_id, 'audit_verified', "Verified during audit: {$session->name}", 'audit_session', $session->id);
 
         Notification::make()->title("Verified: {$item->asset->name}")->success()->send();
+    }
+
+    /**
+     * The "it's here, just not where expected" counterpart to
+     * verifyManually() — the asset is confirmed present (so the item is
+     * verified, same as a plain check), but rather than silently
+     * recording a mismatch for someone to sort out later, this raises
+     * an ordinary AssetTransferRequest on the spot (reason "Found in
+     * audit"), so the room correction goes through the exact same
+     * Manager-approval path as any other move. Never touches
+     * $asset->room_id itself — that only ever happens once that
+     * request is approved (AssetTransferRequestResource::approveAction()).
+     */
+    public function foundInAnotherRoom(int $itemId, int $foundRoomId): void
+    {
+        $session = $this->getSession();
+
+        if (! $session->isInProgress() || ! AssetAuditSessionResource::userIsAssetAdminOrManager()) {
+            return;
+        }
+
+        AssetLock::once("asset-audit-item:{$itemId}", function () use ($itemId, $session, $foundRoomId) {
+            /** @var AssetAuditItem $item */
+            $item = AssetAuditItem::query()->where('session_id', $session->id)->with('asset')->findOrFail($itemId);
+
+            if ($item->isVerified()) {
+                Notification::make()->title('Already verified: '.($item->asset->name ?? 'this asset'))->success()->send();
+
+                return;
+            }
+
+            $asset = $item->asset;
+
+            if (! $asset) {
+                Notification::make()->title('This asset no longer exists and cannot be verified.')->danger()->send();
+
+                return;
+            }
+
+            if ($asset->hasPendingTransfer()) {
+                Notification::make()->title('This asset already has a pending transfer request — refresh and check its current state.')->danger()->send();
+
+                return;
+            }
+
+            $request = DB::transaction(function () use ($item, $asset, $foundRoomId, $session): AssetTransferRequest {
+                $item->update([
+                    'verified_at' => now(),
+                    'verified_by' => auth()->id(),
+                    'verify_method' => AssetAuditVerifyMethod::ManualCheck,
+                    'found_room_id' => $foundRoomId,
+                ]);
+
+                $request = AssetTransferRequest::create([
+                    'asset_id' => $asset->id,
+                    'from_room_id' => $asset->room_id,
+                    'to_room_id' => $foundRoomId,
+                    'reason' => 'Found in audit',
+                    'status' => AssetTransferStatus::Pending,
+                    'requested_by' => auth()->id(),
+                    'requested_at' => now(),
+                ]);
+
+                AssetHistory::record($asset->id, 'audit_verified', "Found in a different room during audit: {$session->name}.", 'audit_session', $session->id);
+                AssetHistory::record($asset->id, 'transfer_requested', "Requested move to {$request->toRoom->path()} (found in audit).", 'transfer_request', $request->id);
+
+                return $request;
+            });
+
+            app(AssetNotifier::class)->transferRequested($request->fresh(['asset', 'requestedBy', 'toRoom']));
+
+            Notification::make()->title('Verified — a change-location request was submitted for Manager approval.')->success()->send();
+        });
     }
 
     public function closeSession(): void
@@ -253,7 +446,7 @@ class ViewAssetAuditSession extends Page
                     $item->update(['outcome' => $outcome]);
 
                     if ($outcome === AssetAuditOutcome::Missing) {
-                        AssetHistory::record($item->asset_id, 'audit_flagged_missing', "Not verified during audit: {$session->name}", 'audit_session', $session->id);
+                        AssetHistory::record($item->asset_id, 'audit_flagged_missing', "Not found during audit: {$session->name}", 'audit_session', $session->id);
                     }
                 }
 
@@ -266,72 +459,5 @@ class ViewAssetAuditSession extends Page
         });
 
         Notification::make()->title('Audit closed.')->success()->send();
-    }
-
-    public function reviewItem(int $itemId, string $action, ?string $note = null): void
-    {
-        if (! AssetAuditSessionResource::userIsAssetAdminOrManager()) {
-            return;
-        }
-
-        $reviewAction = AssetAuditReviewAction::from($action);
-        $session = $this->getSession();
-
-        AssetLock::once("asset-audit-item:{$itemId}", function () use ($itemId, $session, $reviewAction, $note) {
-            /** @var AssetAuditItem $item */
-            $item = AssetAuditItem::query()->where('session_id', $session->id)->with('asset')->findOrFail($itemId);
-
-            if (! $item->needsReview()) {
-                return;
-            }
-
-            DB::transaction(function () use ($item, $reviewAction, $note, $session) {
-                match ($reviewAction) {
-                    AssetAuditReviewAction::MarkedLost => $this->applyMarkedLost($item),
-                    AssetAuditReviewAction::LocationCorrected => $this->applyLocationCorrected($item),
-                    AssetAuditReviewAction::KeptAsIs, AssetAuditReviewAction::Dismissed => null,
-                };
-
-                $item->update([
-                    'review_action' => $reviewAction,
-                    'reviewed_by' => auth()->id(),
-                    'reviewed_at' => now(),
-                    'review_note' => $note,
-                ]);
-
-                AssetHistory::record($item->asset_id, 'audit_reviewed', $note ?: $reviewAction->getLabel(), 'audit_session', $session->id);
-            });
-        });
-
-        Notification::make()->title('Review recorded.')->success()->send();
-    }
-
-    private function applyMarkedLost(AssetAuditItem $item): void
-    {
-        $asset = $item->asset;
-        $previousStatus = $asset->status;
-
-        if ($previousStatus === AssetStatus::Lost) {
-            return;
-        }
-
-        $asset->update(['status' => AssetStatus::Lost]);
-        AssetHistory::recordFieldChange($asset->id, 'Status', $previousStatus->getLabel(), AssetStatus::Lost->getLabel(), 'status_changed');
-    }
-
-    private function applyLocationCorrected(AssetAuditItem $item): void
-    {
-        $asset = $item->asset;
-        $newRoomId = $item->found_room_id ?? $item->expected_room_id;
-
-        if ($newRoomId === $asset->room_id) {
-            return;
-        }
-
-        $oldRoom = $asset->room;
-        $asset->update(['room_id' => $newRoomId]);
-        $asset->refresh();
-
-        AssetHistory::recordFieldChange($asset->id, 'Location', $oldRoom?->path(), $asset->room?->path(), 'location_changed');
     }
 }

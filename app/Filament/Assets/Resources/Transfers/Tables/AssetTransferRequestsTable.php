@@ -4,8 +4,6 @@ namespace App\Filament\Assets\Resources\Transfers\Tables;
 
 use App\Filament\Assets\Resources\Transfers\AssetTransferRequestResource;
 use App\Models\AssetTransferRequest;
-use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,11 +22,6 @@ class AssetTransferRequestsTable
                 TextColumn::make('requestedBy.name')->label('Requested by'),
                 TextColumn::make('requested_at')->label('Requested')->dateTime()->sortable(),
                 TextColumn::make('status')->label('Status')->badge(),
-                IconColumn::make('self_approved')
-                    ->label('Self-approved')
-                    ->icon(fn (AssetTransferRequest $record) => $record->isSelfApproved() ? Heroicon::OutlinedExclamationTriangle : null)
-                    ->color('warning')
-                    ->tooltip(fn (AssetTransferRequest $record): ?string => $record->isSelfApproved() ? 'Approved by the same person who requested it' : null),
             ])
             ->recordActions([
                 AssetTransferRequestResource::approveAction(),

@@ -2,8 +2,11 @@
 
 namespace App\Services\Assets;
 
+use App\Enums\AssetDeleteRequestStatus;
 use App\Enums\AssetRole;
 use App\Filament\Assets\Resources\Assets\AssetResource;
+use App\Models\AssetDeleteRequest;
+use App\Models\AssetEditRequest;
 use App\Models\AssetMaintenanceRecord;
 use App\Models\AssetTransferRequest;
 use App\Models\User;
@@ -78,6 +81,68 @@ class AssetNotifier
             "Your maintenance record was {$verb}: {$record->asset->name}",
             $record->decision_note,
             AssetResource::getUrl('view', ['record' => $record->asset_id]),
+        );
+    }
+
+    public function editRequested(AssetEditRequest $request): void
+    {
+        $recipients = $this->usersWithRole(AssetRole::Manager)->reject(fn (User $u): bool => $u->id === $request->requested_by);
+
+        $this->alert(
+            $recipients,
+            "New edit request: {$request->asset->name}",
+            "{$request->requestedBy->name} requested changes to ".$request->fieldsSummary().'.',
+            AssetResource::getUrl('view', ['record' => $request->asset_id]),
+        );
+    }
+
+    public function editDecided(AssetEditRequest $request): void
+    {
+        $requester = $request->requestedBy;
+
+        if (! $requester || $requester->id === auth()->id()) {
+            return;
+        }
+
+        $verb = $request->status->getLabel();
+
+        $this->alert(
+            collect([$requester]),
+            "Your edit request was {$verb}: {$request->asset->name}",
+            $request->review_note,
+            AssetResource::getUrl('view', ['record' => $request->asset_id]),
+        );
+    }
+
+    public function deleteRequested(AssetDeleteRequest $request): void
+    {
+        $recipients = $this->usersWithRole(AssetRole::Manager)->reject(fn (User $u): bool => $u->id === $request->requested_by);
+
+        $this->alert(
+            $recipients,
+            "New deletion request: {$request->asset->name}",
+            "{$request->requestedBy->name} requested to delete this asset.",
+            AssetResource::getUrl('view', ['record' => $request->asset_id]),
+        );
+    }
+
+    public function deleteDecided(AssetDeleteRequest $request): void
+    {
+        $requester = $request->requestedBy;
+
+        if (! $requester || $requester->id === auth()->id()) {
+            return;
+        }
+
+        $verb = $request->status->getLabel();
+
+        $this->alert(
+            collect([$requester]),
+            "Your deletion request was {$verb}: {$request->asset->name}",
+            $request->review_note,
+            // No link once approved — the asset itself no longer exists
+            // at that URL.
+            $request->status === AssetDeleteRequestStatus::Approved ? null : AssetResource::getUrl('view', ['record' => $request->asset_id]),
         );
     }
 

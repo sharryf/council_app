@@ -21,13 +21,19 @@ class AssetAttachmentController extends Controller
         $user = auth()->user();
         abort_unless($user && $user->assetRoleList() !== [], 403);
 
-        // Photos render inline (used as <img src>) — documents force a
-        // download, since a browser may otherwise try to render a PDF
-        // or DOCX in a way that isn't what the "Attachments" tab wants.
+        // Photos render inline (used as <img src>). Documents now open
+        // inline too — a PDF or image previews right in the browser tab;
+        // the browser itself falls back to downloading anything it can't
+        // render natively (e.g. DOCX/XLSX), so this is a strict upgrade
+        // over always forcing a download.
         if ($attachment->kind === 'photo') {
             return Storage::disk('local')->response($attachment->file_path, $attachment->file_name);
         }
 
-        return Storage::disk('local')->download($attachment->file_path, $attachment->file_name);
+        $downloadName = $attachment->document_name
+            ? "{$attachment->document_name}.".pathinfo($attachment->file_name, PATHINFO_EXTENSION)
+            : $attachment->file_name;
+
+        return Storage::disk('local')->response($attachment->file_path, $downloadName);
     }
 }
