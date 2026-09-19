@@ -18,17 +18,19 @@ class AssetAuditSessionsTable
                 'items as verified_items_count' => fn ($q) => $q->whereNotNull('verified_at'),
             ]))
             ->columns([
-                TextColumn::make('name')->label('Name')->searchable()->wrap(),
+                TextColumn::make('name')->label('Name')->searchable()->wrap()->width('280px'),
                 TextColumn::make('scope_type')
                     ->label('Location')
-                    ->formatStateUsing(fn (AssetAuditSession $record): string => $record->scopeDescription()),
+                    ->formatStateUsing(fn (AssetAuditSession $record): string => $record->locationLabel())
+                    ->wrap()
+                    ->width('160px'),
                 TextColumn::make('status')->label('Status')->badge(),
                 TextColumn::make('progress')
                     ->label('Progress')
                     ->state(fn (AssetAuditSession $record): string => "{$record->verified_items_count} / {$record->items_count} verified"),
                 TextColumn::make('startedBy.name')->label('Started by'),
-                TextColumn::make('started_at')->label('Started')->dateTime()->sortable(),
-                TextColumn::make('closed_at')->label('Closed')->dateTime()->placeholder('—'),
+                TextColumn::make('started_at')->label('Started')->date()->sortable(),
+                TextColumn::make('closed_at')->label('Closed')->date()->placeholder('—'),
             ])
             ->recordUrl(fn (AssetAuditSession $record): string => AssetAuditSessionResource::getUrl('view', ['record' => $record]))
             ->defaultSort('started_at', 'desc');

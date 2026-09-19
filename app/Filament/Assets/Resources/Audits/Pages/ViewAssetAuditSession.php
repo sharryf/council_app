@@ -35,13 +35,18 @@ use Illuminate\Support\Facades\DB;
  * manual checklist, then close the session (computing every item's
  * outcome).
  *
- * An audit never edits an asset's condition or room directly — the
- * closest it comes is foundInAnotherRoom(), which raises an ordinary
- * AssetTransferRequest (reason "Found in audit") for a Manager to
- * decide, same as every other room change in this module. There's no
- * post-close review queue: an item left unverified when the session
- * closes is simply tagged AssetAuditOutcome::Missing ("Not Found in
- * this Audit") and that's the end of it.
+ * An audit never edits an asset's condition or room directly. When an
+ * item turns up somewhere unexpected, the checklist offers two ways to
+ * record that: foundInAnotherRoom() ("move it here" — raises an
+ * ordinary AssetTransferRequest, reason "Found in audit", for a
+ * Manager to decide, same as every other room change in this module)
+ * or foundMisplaced() ("it's misplaced, return it" — just a note, no
+ * request, since the room of record isn't changing). A plain
+ * verification can be walked back with undoVerification(); either of
+ * the above cannot, once made. There's no post-close review queue: an
+ * item left unverified when the session closes is simply tagged
+ * AssetAuditOutcome::Missing ("Not Found in this Audit") and that's the
+ * end of it.
  *
  * Not built: true offline queueing (spec's "queue verifications
  * locally and sync when connectivity returns") — this app has no
@@ -93,6 +98,12 @@ class ViewAssetAuditSession extends Page
                 ->icon(Heroicon::OutlinedArrowDownTray)
                 ->color('gray')
                 ->url(fn (): string => route('assets.export.audit-items', $this->record)),
+            Action::make('exportPdf')
+                ->label('Export PDF')
+                ->icon(Heroicon::OutlinedDocumentArrowDown)
+                ->color('gray')
+                ->url(fn (): string => route('assets.export.audit-pdf', $this->record))
+                ->openUrlInNewTab(),
         ];
     }
 
@@ -392,7 +403,7 @@ class ViewAssetAuditSession extends Page
                 $item->update([
                     'verified_at' => now(),
                     'verified_by' => auth()->id(),
-                    'verify_method' => AssetAuditVerifyMethod::ManualCheck,
+                    'verify_method' => AssetAuditVerifyMethod::FoundElsewhere,
                     'found_room_id' => $foundRoomId,
                 ]);
 
@@ -415,6 +426,102 @@ class ViewAssetAuditSession extends Page
             app(AssetNotifier::class)->transferRequested($request->fresh(['asset', 'requestedBy', 'toRoom']));
 
             Notification::make()->title('Verified — a change-location request was submitted for Manager approval.')->success()->send();
+        });
+    }
+
+    /**
+     * The "it was found elsewhere, but it belongs back where it was
+     * expected" counterpart to foundInAnotherRoom() — same verified-
+     * with-a-note shape, but deliberately raises no transfer request:
+     * the asset's room of record isn't changing, someone's just
+     * physically returning it, so there's nothing for a Manager to
+     * approve.
+     */
+    public function foundMisplaced(int $itemId, int $foundRoomId): void
+    {
+        $session = $this->getSession();
+
+        if (! $session->isInProgress() || ! AssetAuditSessionResource::userIsAssetAdminOrManager()) {
+            return;
+        }
+
+        AssetLock::once("asset-audit-item:{$itemId}", function () use ($itemId, $session, $foundRoomId) {
+            /** @var AssetAuditItem $item */
+            $item = AssetAuditItem::query()->where('session_id', $session->id)->with(['asset', 'expectedRoom'])->findOrFail($itemId);
+
+            if ($item->isVerified()) {
+                Notification::make()->title('Already verified: '.($item->asset->name ?? 'this asset'))->success()->send();
+
+                return;
+            }
+
+            if (! $item->asset) {
+                Notification::make()->title('This asset no longer exists and cannot be verified.')->danger()->send();
+
+                return;
+            }
+
+            $foundRoom = AssetRoom::find($foundRoomId);
+
+            $item->update([
+                'verified_at' => now(),
+                'verified_by' => auth()->id(),
+                'verify_method' => AssetAuditVerifyMethod::Misplaced,
+                'found_room_id' => $foundRoomId,
+            ]);
+
+            AssetHistory::record(
+                $item->asset_id,
+                'audit_verified',
+                "Found misplaced in {$foundRoom?->path()} during audit: {$session->name} — to be returned to {$item->expectedRoom->path()}.",
+                'audit_session',
+                $session->id,
+            );
+
+            Notification::make()->title('Verified — marked misplaced, to be returned to '.$item->expectedRoom->path().'.')->success()->send();
+        });
+    }
+
+    /**
+     * Undoes a plain Verify/scan only — a misclick is easy to make when
+     * working through a long checklist. A verification that came with a
+     * room-change decision (foundInAnotherRoom()/foundMisplaced()) isn't
+     * offered this button at all (see the Blade view) and is rejected
+     * here too, since undoing it cleanly would also mean unwinding a
+     * transfer request that may already be decided.
+     */
+    public function undoVerification(int $itemId): void
+    {
+        $session = $this->getSession();
+
+        if (! $session->isInProgress() || ! AssetAuditSessionResource::userIsAssetAdminOrManager()) {
+            return;
+        }
+
+        AssetLock::once("asset-audit-item:{$itemId}", function () use ($itemId, $session) {
+            /** @var AssetAuditItem $item */
+            $item = AssetAuditItem::query()->where('session_id', $session->id)->with('asset')->findOrFail($itemId);
+
+            if (! $item->isVerified()) {
+                return;
+            }
+
+            if (! $item->verify_method?->isUndoable()) {
+                Notification::make()->title('This verification came with a location change and can\'t be undone here.')->danger()->send();
+
+                return;
+            }
+
+            $item->update([
+                'verified_at' => null,
+                'verified_by' => null,
+                'verify_method' => null,
+                'found_room_id' => null,
+            ]);
+
+            AssetHistory::record($item->asset_id, 'audit_verification_undone', "Verification undone during audit: {$session->name}", 'audit_session', $session->id);
+
+            Notification::make()->title('Verification undone: '.($item->asset->name ?? 'this asset'))->success()->send();
         });
     }
 

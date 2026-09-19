@@ -19,8 +19,9 @@ class AssetTransferRequestsTable
                 TextColumn::make('asset.name')->label('Asset')->wrap(),
                 TextColumn::make('fromRoom.name')->label('From')->formatStateUsing(fn (AssetTransferRequest $record): string => $record->fromRoom->path()),
                 TextColumn::make('toRoom.name')->label('To')->formatStateUsing(fn (AssetTransferRequest $record): string => $record->toRoom->path()),
+                TextColumn::make('reason')->label('Reason')->limit(40),
                 TextColumn::make('requestedBy.name')->label('Requested by'),
-                TextColumn::make('requested_at')->label('Requested')->dateTime()->sortable(),
+                TextColumn::make('requested_at')->label('Requested')->dateTime('M j, Y H:i')->sortable(),
                 TextColumn::make('status')->label('Status')->badge(),
             ])
             ->recordActions([

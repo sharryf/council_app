@@ -79,6 +79,9 @@ Route::middleware('auth')->group(function () {
 
     Route::get('assets/export/audits/{session}', [AssetExportController::class, 'auditItems'])
         ->name('assets.export.audit-items');
+
+    Route::get('assets/export/audits/{session}/pdf', [AssetExportController::class, 'auditPdf'])
+        ->name('assets.export.audit-pdf');
 });
 
 // Public, no-login QR landing (spec section 9/6.7) — deliberately

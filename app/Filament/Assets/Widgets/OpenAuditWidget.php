@@ -8,11 +8,15 @@ use App\Filament\Assets\Resources\Audits\AssetAuditSessionResource;
 use App\Models\AssetAuditItem;
 use App\Models\AssetAuditSession;
 use Filament\Widgets\Widget;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Spec section 6.1: "Open audit session banner, if one is in progress,
  * with progress (e.g. '48 of 120 verified')." Renders nothing at all
- * when there's no in-progress session — not an empty card.
+ * when there's no in-progress session — not an empty card. Multiple
+ * sessions may be in progress at once (no longer capped at one — see
+ * CreateAssetAuditSession), so this lists every one of them rather
+ * than assuming a single result.
  */
 class OpenAuditWidget extends Widget
 {
@@ -32,9 +36,12 @@ class OpenAuditWidget extends Widget
         return self::userHasAnyAssetRole();
     }
 
-    public function getSession(): ?AssetAuditSession
+    /**
+     * @return Collection<int, AssetAuditSession>
+     */
+    public function getSessions(): Collection
     {
-        return AssetAuditSession::query()->where('status', AssetAuditSessionStatus::InProgress)->first();
+        return AssetAuditSession::query()->where('status', AssetAuditSessionStatus::InProgress)->get();
     }
 
     /**

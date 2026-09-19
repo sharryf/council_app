@@ -60,13 +60,18 @@ class AssetAuditSession extends Model
         return $this->status === AssetAuditSessionStatus::InProgress;
     }
 
-    public function scopeDescription(): string
+    public function locationLabel(): string
     {
-        $location = match ($this->scope_type) {
+        return match ($this->scope_type) {
             AssetAuditScopeType::All => 'All Locations',
             AssetAuditScopeType::Building => $this->scopeBuilding?->name ?? 'Building',
             AssetAuditScopeType::Room => $this->scopeRoom?->path() ?? 'Room',
         };
+    }
+
+    public function scopeDescription(): string
+    {
+        $location = $this->locationLabel();
 
         return $this->scope_category_id === null
             ? $location

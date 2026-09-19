@@ -103,14 +103,34 @@
             @endif
 
             @if ($canAct)
+                @php $unverifiedCount = $progress['total'] - $progress['verified']; @endphp
                 <div style="margin-top: 1rem;">
-                    <x-filament::button
-                        color="danger"
-                        wire:click="closeSession"
-                        wire:confirm="Close this session? Every item still unverified will be tagged 'Not Found in this Audit' — no further review or action is needed for those."
-                    >
-                        Close Session
-                    </x-filament::button>
+                    <x-filament::modal id="close-session" width="sm" icon="heroicon-o-lock-closed" icon-color="danger">
+                        <x-slot name="trigger">
+                            <x-filament::button type="button" color="danger">
+                                Close Session
+                            </x-filament::button>
+                        </x-slot>
+
+                        <x-slot name="heading">Close this audit session?</x-slot>
+
+                        <x-slot name="description">
+                            @if ($unverifiedCount > 0)
+                                {{ $unverifiedCount }} {{ \Illuminate\Support\Str::plural('item', $unverifiedCount) }} still unverified. Closing will tag {{ $unverifiedCount === 1 ? 'it' : 'them' }} <strong>"Not Found in this Audit"</strong> and the session can no longer be reopened or acted on.
+                            @else
+                                Every item has been verified. Once closed, the session can no longer be reopened or acted on.
+                            @endif
+                        </x-slot>
+
+                        <x-slot name="footerActions">
+                            <x-filament::button type="button" color="danger" wire:click="closeSession" x-on:click="close()">
+                                Close Session
+                            </x-filament::button>
+                            <x-filament::button type="button" color="gray" x-on:click="close()">
+                                Cancel
+                            </x-filament::button>
+                        </x-slot>
+                    </x-filament::modal>
                 </div>
             @endif
         </x-filament::section>
@@ -315,23 +335,83 @@
                                 </x-filament::button>
 
                                 {{-- The asset IS present, just not where
-                                     expected — this verifies it (same as
-                                     a plain check) and raises an ordinary
+                                     expected — either raises an ordinary
                                      transfer request for a Manager to
-                                     decide, rather than editing the
-                                     asset's room directly. --}}
-                                <div class="aas-filter" x-data="{ open: false }" style="position: relative;">
-                                    <x-filament::button type="button" size="sm" color="gray" icon="heroicon-o-map-pin" x-on:click="open = ! open">
-                                        Found in Another Room
-                                    </x-filament::button>
-                                    <div class="aas-filter-panel" x-show="open" x-cloak x-on:click.outside="open = false" style="left: auto; right: 0; min-width: 16rem;">
-                                        @forelse ($this->foundInRoomOptions($item) as $id => $name)
-                                            <button type="button" class="aas-filter-option" wire:click="foundInAnotherRoom({{ $item->id }}, {{ $id }})" x-on:click="open = false">{{ $name }}</button>
-                                        @empty
-                                            <p class="meta" style="padding: 0.375rem 0.625rem;">No other rooms available.</p>
-                                        @endforelse
+                                     decide (it's staying in the room it
+                                     was found in), or just notes it's
+                                     misplaced and will be physically
+                                     returned (no request — the room of
+                                     record isn't changing). Never edits
+                                     the asset's room directly either
+                                     way. A small icon trigger next to
+                                     Verify, not another full-width
+                                     button. Two steps: pick the room
+                                     first, then what to do about it —
+                                     packing both a room list and two
+                                     actions per row got cramped and the
+                                     small icons read as ambiguous. --}}
+                                <div class="aas-filter" x-data="{ open: false, room: null }" style="position: relative;">
+                                    <x-filament::icon-button
+                                        type="button"
+                                        icon="heroicon-o-map-pin"
+                                        color="warning"
+                                        label="Found in Another Room"
+                                        tooltip="Found in Another Room"
+                                        x-on:click="open = ! open; room = null"
+                                    />
+                                    <div class="aas-filter-panel" x-show="open" x-cloak x-on:click.outside="open = false" style="left: auto; right: 0; min-width: 17rem;">
+                                        <template x-if="! room">
+                                            <div>
+                                                <p class="meta" style="padding: 0.25rem 0.625rem 0.375rem; font-weight: 600;">Found in Another Room</p>
+                                                @forelse ($this->foundInRoomOptions($item) as $id => $name)
+                                                    <button type="button" class="aas-filter-option" x-on:click="room = { id: {{ $id }}, name: @js($name) }">{{ $name }}</button>
+                                                @empty
+                                                    <p class="meta" style="padding: 0.375rem 0.625rem;">No other rooms available.</p>
+                                                @endforelse
+                                            </div>
+                                        </template>
+                                        <template x-if="room">
+                                            <div>
+                                                <button type="button" class="aas-filter-option" style="display: flex; align-items: center; gap: 0.25rem; color: var(--gray-500);" x-on:click="room = null">
+                                                    <x-filament::icon icon="heroicon-m-chevron-left" style="width: 0.875rem; height: 0.875rem;" />
+                                                    Back
+                                                </button>
+                                                <p class="meta" style="padding: 0.25rem 0.625rem 0.5rem; font-weight: 600;" x-text="room?.name"></p>
+                                                <button type="button" class="aas-filter-option" style="display: flex; align-items: center; gap: 0.5rem; color: #d97706;" x-on:click="$wire.call('foundInAnotherRoom', {{ $item->id }}, room.id); open = false">
+                                                    <x-filament::icon icon="heroicon-o-arrow-right" style="width: 1rem; height: 1rem; flex-shrink: 0;" />
+                                                    Move here
+                                                </button>
+                                                <button type="button" class="aas-filter-option" style="display: flex; align-items: center; gap: 0.5rem;" x-on:click="$wire.call('foundMisplaced', {{ $item->id }}, room.id); open = false">
+                                                    <x-filament::icon icon="heroicon-o-arrow-uturn-left" style="width: 1rem; height: 1rem; flex-shrink: 0; color: var(--gray-400);" />
+                                                    Return to {{ $item->expectedRoom->path() }}
+                                                </button>
+                                            </div>
+                                        </template>
                                     </div>
                                 </div>
+                            @elseif ($tab === 'verified' && $canAct && $item->verify_method?->isUndoable())
+                                <x-filament::modal id="undo-verification-{{ $item->id }}" width="sm" icon="heroicon-o-arrow-uturn-left" icon-color="danger">
+                                    <x-slot name="trigger">
+                                        <x-filament::button type="button" size="sm" color="gray" icon="heroicon-o-arrow-uturn-left">
+                                            Undo
+                                        </x-filament::button>
+                                    </x-slot>
+
+                                    <x-slot name="heading">Undo this verification?</x-slot>
+
+                                    <x-slot name="description">
+                                        {{ $item->asset?->name }} will go back to Pending.
+                                    </x-slot>
+
+                                    <x-slot name="footerActions">
+                                        <x-filament::button type="button" color="danger" wire:click="undoVerification({{ $item->id }})" x-on:click="close()">
+                                            Undo
+                                        </x-filament::button>
+                                        <x-filament::button type="button" color="gray" x-on:click="close()">
+                                            Cancel
+                                        </x-filament::button>
+                                    </x-slot>
+                                </x-filament::modal>
                             @endif
                         </div>
                     </div>

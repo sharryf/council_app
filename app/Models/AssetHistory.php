@@ -115,6 +115,7 @@ class AssetHistory extends Model
             'photo_replaced' => 'Photo replaced',
             'attachment_added' => 'Document added',
             'audit_verified' => 'Verified in audit',
+            'audit_verification_undone' => 'Verification undone in audit',
             'audit_flagged_missing' => 'Flagged missing in audit',
             'audit_reviewed' => 'Reviewed in audit',
             default => Str::headline($this->event_type),

@@ -307,6 +307,41 @@ class AssetExportController extends Controller
         return $this->streamCsv("Audit — {$session->name}", $header, $rows, "audit-{$session->id}");
     }
 
+    public function auditPdf(AssetAuditSession $session): StreamedResponse
+    {
+        $this->authorize();
+
+        $session->load(['startedBy', 'closedBy']);
+
+        $items = AssetAuditItem::query()
+            ->where('session_id', $session->id)
+            ->with(['asset', 'expectedRoom.building', 'foundRoom.building'])
+            ->join('assets', 'assets.id', '=', 'asset_audit_items.asset_id')
+            ->orderBy('assets.name')
+            ->select('asset_audit_items.*')
+            ->get();
+
+        $html = view('assets.pdf.audit-session', [
+            'session' => $session,
+            'items' => $items,
+            'generatedAt' => now()->format('d/m/Y H:i'),
+        ])->render();
+
+        $relativePath = 'assets/exports/audit-'.$session->id.'-'.now()->timestamp.'.pdf';
+        Storage::disk('local')->makeDirectory(dirname($relativePath));
+
+        Browsershot::html($html)
+            ->noSandbox()
+            ->writeOptionsToFile()
+            ->format('A4')
+            ->landscape()
+            ->showBackground()
+            ->margins(15, 10, 15, 10)
+            ->savePdf(Storage::disk('local')->path($relativePath));
+
+        return Storage::disk('local')->response($relativePath, "audit-{$session->id}-".now()->format('Y-m-d').'.pdf');
+    }
+
     /**
      * @param  iterable<int, array<int, mixed>>  $rows
      */

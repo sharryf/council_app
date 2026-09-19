@@ -22,7 +22,7 @@ class AssetEditRequestsTable
                     ->state(fn (AssetEditRequest $record): string => $record->fieldsSummary()),
                 TextColumn::make('reason')->label('Reason')->limit(40),
                 TextColumn::make('requestedBy.name')->label('Requested by'),
-                TextColumn::make('requested_at')->label('Requested')->dateTime()->sortable(),
+                TextColumn::make('requested_at')->label('Requested')->date()->sortable(),
                 TextColumn::make('status')->label('Status')->badge(),
                 TextColumn::make('reviewedBy.name')->label('Approved by')->placeholder('—'),
             ])

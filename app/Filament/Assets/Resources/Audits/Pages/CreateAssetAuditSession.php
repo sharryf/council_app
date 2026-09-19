@@ -9,7 +9,6 @@ use App\Filament\Assets\Resources\Audits\AssetAuditSessionResource;
 use App\Models\Asset;
 use App\Models\AssetAuditItem;
 use App\Models\AssetAuditSession;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -18,28 +17,10 @@ class CreateAssetAuditSession extends CreateRecord
 {
     protected static string $resource = AssetAuditSessionResource::class;
 
-    // Only one in-progress session is ever allowed (see
-    // handleRecordCreation() below), so "Create & create another"
-    // would just fail on the very next submission.
     protected static bool $canCreateAnother = false;
 
-    /**
-     * Only one in-progress session at a time (implementation plan
-     * section 3.8/8.20) — checked here, defensively, not just relied
-     * on as a UI assumption.
-     */
     protected function handleRecordCreation(array $data): Model
     {
-        if (AssetAuditSession::query()->where('status', AssetAuditSessionStatus::InProgress)->exists()) {
-            Notification::make()
-                ->title('An audit session is already in progress.')
-                ->body('Close it before starting a new one.')
-                ->danger()
-                ->send();
-
-            $this->halt();
-        }
-
         $scopeType = AssetAuditScopeType::from($data['scope_type']);
 
         return DB::transaction(function () use ($data, $scopeType): AssetAuditSession {

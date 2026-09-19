@@ -1,12 +1,12 @@
 @php
-    $session = $this->getSession();
+    $sessions = $this->getSessions();
 @endphp
 
 {{-- A Livewire component must always render exactly one root element
      — even when there's nothing to show, this <div> has to exist (just
      empty), or Livewire throws RootTagMissingFromViewException. --}}
-<div>
-    @if ($session)
+<div style="display: flex; flex-direction: column; gap: 0.75rem;">
+    @foreach ($sessions as $session)
         @php $progress = $this->getProgress($session); @endphp
         <x-filament::section>
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
@@ -24,5 +24,5 @@
                 </x-filament::button>
             </div>
         </x-filament::section>
-    @endif
+    @endforeach
 </div>

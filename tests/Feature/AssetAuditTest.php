@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\AssetAuditOutcome;
 use App\Enums\AssetAuditScopeType;
 use App\Enums\AssetAuditSessionStatus;
+use App\Enums\AssetAuditVerifyMethod;
 use App\Enums\AssetRole;
 use App\Enums\AssetStatus;
 use App\Enums\AssetTransferStatus;
@@ -159,7 +160,7 @@ class AssetAuditTest extends TestCase
         $this->assertFalse($assetIds->contains($chairInRoomA->id));
     }
 
-    public function test_only_one_in_progress_session_is_allowed(): void
+    public function test_multiple_sessions_can_be_in_progress_at_once(): void
     {
         $admin = $this->makeUser(AssetRole::Admin);
         $this->actingAs($admin);
@@ -173,9 +174,14 @@ class AssetAuditTest extends TestCase
 
         Livewire::test(CreateAssetAuditSession::class)
             ->fillForm(['name' => 'Second Audit', 'scope_type' => AssetAuditScopeType::All->value])
-            ->call('create');
+            ->call('create')
+            ->assertHasNoFormErrors();
 
-        $this->assertSame(1, AssetAuditSession::count());
+        $this->assertSame(2, AssetAuditSession::count());
+        $this->assertSame(
+            2,
+            AssetAuditSession::where('status', AssetAuditSessionStatus::InProgress)->count(),
+        );
     }
 
     public function test_verifying_by_code_is_idempotent_and_rejects_out_of_scope_assets(): void
@@ -330,6 +336,86 @@ class AssetAuditTest extends TestCase
         $this->assertSame($foundRoom->id, $request->to_room_id);
         $this->assertSame('Found in audit', $request->reason);
         $this->assertSame($admin->id, $request->requested_by);
+    }
+
+    public function test_found_misplaced_verifies_the_item_without_raising_a_transfer_request(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+        $expectedRoom = $this->makeRoom('Main Office', 'Room 101');
+        $foundRoom = $this->makeRoom('Main Office', 'Room 202');
+        $asset = $this->makeAsset($admin, $expectedRoom);
+
+        $session = AssetAuditSession::create([
+            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::InProgress,
+            'started_by' => $admin->id, 'started_at' => now(),
+        ]);
+        $item = AssetAuditItem::create(['session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $expectedRoom->id]);
+
+        Livewire::test(ViewAssetAuditSession::class, ['record' => $session->getKey()])
+            ->call('foundMisplaced', $item->id, $foundRoom->id);
+
+        $freshItem = $item->fresh();
+        $this->assertNotNull($freshItem->verified_at);
+        $this->assertSame($foundRoom->id, $freshItem->found_room_id);
+        $this->assertSame(AssetAuditVerifyMethod::Misplaced, $freshItem->verify_method);
+
+        // No transfer request at all — the room of record never changes
+        // for a "bring it back" note.
+        $this->assertSame($expectedRoom->id, $asset->fresh()->room_id);
+        $this->assertSame(0, AssetTransferRequest::where('asset_id', $asset->id)->count());
+    }
+
+    public function test_undo_reverts_a_plain_verification(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+        $room = $this->makeRoom('Main Office', 'Room 101');
+        $asset = $this->makeAsset($admin, $room);
+
+        $session = AssetAuditSession::create([
+            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::InProgress,
+            'started_by' => $admin->id, 'started_at' => now(),
+        ]);
+        $item = AssetAuditItem::create(['session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $room->id]);
+
+        $component = Livewire::test(ViewAssetAuditSession::class, ['record' => $session->getKey()]);
+        $component->call('verifyManually', $item->id);
+        $this->assertNotNull($item->fresh()->verified_at);
+
+        $component->call('undoVerification', $item->id);
+
+        $freshItem = $item->fresh();
+        $this->assertNull($freshItem->verified_at);
+        $this->assertNull($freshItem->verified_by);
+        $this->assertNull($freshItem->verify_method);
+        $this->assertNull($freshItem->found_room_id);
+    }
+
+    public function test_undo_is_rejected_for_a_found_in_another_room_verification(): void
+    {
+        $admin = $this->makeUser(AssetRole::Admin);
+        $this->actingAs($admin);
+        $expectedRoom = $this->makeRoom('Main Office', 'Room 101');
+        $foundRoom = $this->makeRoom('Main Office', 'Room 202');
+        $asset = $this->makeAsset($admin, $expectedRoom);
+
+        $session = AssetAuditSession::create([
+            'name' => 'Audit', 'scope_type' => AssetAuditScopeType::All, 'status' => AssetAuditSessionStatus::InProgress,
+            'started_by' => $admin->id, 'started_at' => now(),
+        ]);
+        $item = AssetAuditItem::create(['session_id' => $session->id, 'asset_id' => $asset->id, 'expected_room_id' => $expectedRoom->id]);
+
+        $component = Livewire::test(ViewAssetAuditSession::class, ['record' => $session->getKey()]);
+        $component->call('foundInAnotherRoom', $item->id, $foundRoom->id);
+        $component->call('undoVerification', $item->id);
+
+        // Untouched — the button isn't even offered for this case (see
+        // the Blade view's isUndoable() check), and the method itself
+        // refuses too.
+        $freshItem = $item->fresh();
+        $this->assertNotNull($freshItem->verified_at);
+        $this->assertSame(AssetAuditVerifyMethod::FoundElsewhere, $freshItem->verify_method);
     }
 
     public function test_closing_a_session_leaves_unverified_items_as_not_found_with_no_review_action_available(): void
