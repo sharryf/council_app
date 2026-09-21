@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // to any of those routes 500s on RouteNotFoundException instead
         // of bouncing to the login page.
         $middleware->redirectGuestsTo(fn () => route('filament.admin.auth.login'));
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
