@@ -54,7 +54,8 @@ still just have the scaffolding to add them cleanly.
    run `php artisan serve --no-reload` and visit `http://localhost:8000`
    — the `--no-reload` matters on Windows: without it, file uploads
    fail (see the Document Signing module's assumptions below for why).
-6. **Log in** at `/admin` (e.g. `http://council-app.test/admin`).
+6. **Log in** at the site root (e.g. `http://council-app.test/`), which
+   redirects to `/login`.
 
 There is no self-registration screen — accounts are created by an admin
 from the topbar **Users** menu item inside the panel (see

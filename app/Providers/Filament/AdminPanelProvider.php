@@ -36,7 +36,7 @@ class AdminPanelProvider extends PanelProvider
         return $panel
             ->default()
             ->id('admin')
-            ->path('admin')
+            ->path('') // served at the site root: the login form is at /login
             ->login()
             ->sidebarWidth('15rem') // default is 20rem — narrower to leave more room for content
             ->colors([

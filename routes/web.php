@@ -16,10 +16,6 @@ use App\Http\Controllers\Inventory\ReorderBuyingListController;
 use App\Http\Controllers\Inventory\ReportExportController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
-
 Route::middleware('auth')->group(function () {
     Route::get('documents/{document}/download/original', [DocumentDownloadController::class, 'original'])
         ->name('documents.download.original');
