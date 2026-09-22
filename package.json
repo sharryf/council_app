@@ -17,6 +17,7 @@
         "@laravel/multiplex": "^0.4.1"
     },
     "dependencies": {
+        "jsqr": "^1.4.0",
         "puppeteer": "^25.8.0"
     }
 }

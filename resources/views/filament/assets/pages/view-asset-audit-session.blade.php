@@ -137,17 +137,36 @@
 
         {{-- Scan / verify --}}
         @if ($canAct)
+            @vite(['resources/js/audit-scanner.js'])
             <x-filament::section heading="Scan or enter an asset">
                 <div
                     x-data="{
-                        supported: false,
+                        // Camera scanning needs getUserMedia, which only
+                        // works on HTTPS (or localhost) — that's the one
+                        // case with no fallback, since there's no camera
+                        // feed to decode from at all.
+                        supported: (navigator.mediaDevices && window.isSecureContext),
                         scanning: false,
                         stream: null,
                         detector: null,
+                        canvas: null,
                         lastCode: null,
                         lastTime: 0,
+                        error: null,
                         init() {
-                            this.supported = ('BarcodeDetector' in window);
+                            // Prefer the native BarcodeDetector where it
+                            // exists (Chrome on Android/ChromeOS) — it's
+                            // faster and offloads work from the main
+                            // thread. Safari (desktop and iOS) never
+                            // implements it, so jsQR — a pure-JS decoder
+                            // pulled in by audit-scanner.js, see there —
+                            // is the fallback that makes scanning work
+                            // there too, decoding frames drawn onto a
+                            // hidden canvas instead of asking the browser
+                            // to do it natively.
+                            if ('BarcodeDetector' in window) {
+                                this.detector = new BarcodeDetector({ formats: ['qr_code'] });
+                            }
                             // Filament navigates between pages via
                             // wire:navigate (no full reload), so leaving
                             // this page while the camera is running would
@@ -162,9 +181,21 @@
                             document.addEventListener('livewire:navigating', () => this.stop());
                         },
                         async start() {
-                            this.detector = new BarcodeDetector({ formats: ['qr_code'] });
-                            this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                            this.error = null;
+                            try {
+                                this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                            } catch (e) {
+                                // iOS Safari throws NotAllowedError both when the
+                                // person declines the permission prompt and when
+                                // the site was never granted camera access at
+                                // all — same message either way, since the fix
+                                // (Settings > Safari > Camera) is the same.
+                                this.error = 'Could not access the camera. Check that this site is allowed to use the camera in your phone\'s Settings, then try again.';
+
+                                return;
+                            }
                             this.$refs.video.srcObject = this.stream;
+                            if (! this.canvas) this.canvas = document.createElement('canvas');
                             this.scanning = true;
                             this.loop();
                         },
@@ -173,18 +204,30 @@
                             this.stream?.getTracks().forEach(t => t.stop());
                             this.stream = null;
                         },
+                        handleCode(value) {
+                            const now = Date.now();
+                            if (value !== this.lastCode || (now - this.lastTime) > 2000) {
+                                this.lastCode = value;
+                                this.lastTime = now;
+                                $wire.call('verifyCode', value);
+                            }
+                        },
                         async loop() {
                             if (! this.scanning || ! this.$refs.video) return;
+                            const video = this.$refs.video;
+
                             try {
-                                const codes = await this.detector.detect(this.$refs.video);
-                                if (codes.length) {
-                                    const value = codes[0].rawValue;
-                                    const now = Date.now();
-                                    if (value !== this.lastCode || (now - this.lastTime) > 2000) {
-                                        this.lastCode = value;
-                                        this.lastTime = now;
-                                        $wire.call('verifyCode', value);
-                                    }
+                                if (this.detector) {
+                                    const codes = await this.detector.detect(video);
+                                    if (codes.length) this.handleCode(codes[0].rawValue);
+                                } else if (video.videoWidth) {
+                                    this.canvas.width = video.videoWidth;
+                                    this.canvas.height = video.videoHeight;
+                                    const ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+                                    ctx.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+                                    const frame = ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+                                    const code = window.jsQR(frame.data, frame.width, frame.height);
+                                    if (code) this.handleCode(code.data);
                                 }
                             } catch (e) {}
                             if (this.scanning) requestAnimationFrame(() => this.loop());
@@ -201,9 +244,10 @@
                                 Stop Camera
                             </x-filament::button>
                         </div>
+                        <p x-show="error" x-text="error" class="meta" style="margin-top: 0.5rem; color: var(--danger-500);"></p>
                     </div>
                     <p x-show="! supported" class="meta" style="margin-bottom: 0.75rem;">
-                        Live camera scanning isn't supported in this browser. Scan the printed label with your phone's own camera app, then paste or type what it reads below — or use the checklist underneath.
+                        Live camera scanning needs this page to be opened over a secure (https://) connection. Scan the printed label with your phone's own camera app, then paste or type what it reads below — or use the checklist underneath.
                     </p>
                 </div>
 
