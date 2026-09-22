@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Pages\Login;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\EditProfile;
 use App\Filament\Resources\DocumentSigning\Documents\Pages\DocumentSigningCleanup;
@@ -37,7 +38,21 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('') // served at the site root: the login form is at /login
-            ->login()
+            ->login(Login::class)
+            // filament.branding.logo renders the logo image AND the
+            // "Oceancy" text together (Filament's own logo component
+            // only ever shows one or the other) — see that view's own
+            // comment. No $suffix here: the main panel shows the bare
+            // brand name, unlike the module panels below.
+            ->brandLogo(fn () => view('filament.branding.logo'))
+            ->favicon(asset('images/oceancy-favicon-32.png'))
+            // The branded side panel on the login/forgot-password screens
+            // — see that view's own comment for how it turns the shared
+            // "simple" auth layout into a split-screen one.
+            ->renderHook(
+                PanelsRenderHook::SIMPLE_LAYOUT_START,
+                fn () => view('filament.branding.login-side-panel'),
+            )
             ->sidebarWidth('15rem') // default is 20rem — narrower to leave more room for content
             ->colors([
                 // "Lagoon" brand palette. `primary` and `gray` are

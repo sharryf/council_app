@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Deploy or update Council App. Run as the `deploy` user (not root).
+# Deploy or update Oceancy. Run as the `deploy` user (not root).
 #
 # First deploy (clones the repo, creates .env, builds, migrates):
 #   REPO_URL=git@github.com:sharryf/council_app.git DOMAIN=council.example.com bash deploy.sh

@@ -23,7 +23,7 @@ class Dashboard extends BaseDashboard
     protected static bool $isDiscovered = false;
 
     /**
-     * The "Council App" brand link in the topbar already points at this
+     * The brand link in the topbar already points at this
      * same `/admin` route (see getLayout()'s note on it being how you
      * get back here from inside a module) — a "Dashboard" sidebar entry
      * pointing at the exact same URL was pure duplication.
@@ -40,7 +40,7 @@ class Dashboard extends BaseDashboard
 
     /**
      * The home page has no sidebar — it's just the module grid, and the
-     * topbar's own "Council App" link (unaffected by this) is how you
+     * topbar's own brand link (unaffected by this) is how you
      * get back here from inside a module. Every other page keeps the
      * normal sidebar via the panel's default layout.
      */

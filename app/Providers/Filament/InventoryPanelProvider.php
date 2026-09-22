@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Pages\Login;
 use App\Filament\Inventory\Pages\Dashboard;
 use App\Support\ColorPalette;
 use Filament\Http\Middleware\Authenticate;
@@ -11,6 +12,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -38,7 +40,15 @@ class InventoryPanelProvider extends PanelProvider
         return $panel
             ->id('inventory')
             ->path('inventory')
-            ->login()
+            ->login(Login::class)
+            // See filament.branding.logo's own comment on why this isn't
+            // a plain ->brandLogo(url) call.
+            ->brandLogo(fn () => view('filament.branding.logo', ['suffix' => 'Inventory']))
+            ->favicon(asset('images/oceancy-favicon-32.png'))
+            ->renderHook(
+                PanelsRenderHook::SIMPLE_LAYOUT_START,
+                fn () => view('filament.branding.login-side-panel'),
+            )
             ->sidebarWidth('14rem') // default is 20rem, Admin/Bureau use 15rem — narrower still, per request (13rem clipped "Units of Measure")
             ->homeUrl(fn (): string => route('filament.admin.pages.dashboard'))
             ->colors([

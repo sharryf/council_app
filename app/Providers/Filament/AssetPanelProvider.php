@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Assets\Pages\Dashboard;
+use App\Filament\Auth\Pages\Login;
 use App\Support\ColorPalette;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -11,6 +12,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -42,7 +44,15 @@ class AssetPanelProvider extends PanelProvider
         return $panel
             ->id('assets')
             ->path('assets')
-            ->login()
+            ->login(Login::class)
+            // See filament.branding.logo's own comment on why this isn't
+            // a plain ->brandLogo(url) call.
+            ->brandLogo(fn () => view('filament.branding.logo', ['suffix' => 'Assets']))
+            ->favicon(asset('images/oceancy-favicon-32.png'))
+            ->renderHook(
+                PanelsRenderHook::SIMPLE_LAYOUT_START,
+                fn () => view('filament.branding.login-side-panel'),
+            )
             ->homeUrl(fn (): string => route('filament.admin.pages.dashboard'))
             ->colors([
                 'primary' => Color::hex('#0E7A82'),

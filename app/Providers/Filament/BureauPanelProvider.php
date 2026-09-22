@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Pages\Login;
 use App\Filament\Bureau\Pages\Dashboard;
 use App\Filament\Bureau\Resources\Meetings\Pages\ListMeetings;
 use App\Filament\Bureau\Widgets\NextMeetingWidget;
@@ -47,7 +48,15 @@ class BureauPanelProvider extends PanelProvider
         return $panel
             ->id('bureau')
             ->path('bureau')
-            ->login()
+            ->login(Login::class)
+            // See filament.branding.logo's own comment on why this isn't
+            // a plain ->brandLogo(url) call.
+            ->brandLogo(fn () => view('filament.branding.logo', ['suffix' => 'Bureau']))
+            ->favicon(asset('images/oceancy-favicon-32.png'))
+            ->renderHook(
+                PanelsRenderHook::SIMPLE_LAYOUT_START,
+                fn () => view('filament.branding.login-side-panel'),
+            )
             // Without this, the topbar/sidebar brand link falls back to
             // this panel's own base URL (see FilamentManager::getHomeUrl())
             // — fine for the admin panel, where that base URL already is

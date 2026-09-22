@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# One-time server setup for Council App on a fresh Ubuntu 24.04 Droplet.
+# One-time server setup for Oceancy on a fresh Ubuntu 24.04 Droplet.
 #
 # Installs nginx, PHP 8.3, MySQL 8, Node 22 and the libraries headless
 # Chrome needs (every PDF export uses Spatie Browsershot + Puppeteer),

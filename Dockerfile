@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Production image for Council App.
+# Production image for Oceancy.
 #
 # FrankenPHP = Caddy + PHP 8.3 in one process, so the container serves the
 # app AND handles HTTPS (automatic Let's Encrypt certificates) by itself.

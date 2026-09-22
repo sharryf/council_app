@@ -1,4 +1,4 @@
-# Council App on a single Ubuntu VPS: the app (FrankenPHP: PHP + web server +
+# Oceancy on a single Ubuntu VPS: the app (FrankenPHP: PHP + web server +
 # automatic HTTPS) and MySQL, each in its own container.
 #
 # First-time setup (on the server, in a clone of this repo):

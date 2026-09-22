@@ -2,10 +2,10 @@
     A copy of vendor filament-panels::components.layout.index with
     $hasNavigation hard-coded false — used only by
     App\Filament\Pages\Dashboard::getLayout() so the sidebar (and its
-    own duplicate "Council App" header) doesn't render on the home
+    own duplicate brand header) doesn't render on the home
     page. Every other page still uses the normal layout with the
     sidebar, via the panel's default `hasNavigation()` setting. The
-    topbar (with its own "Council App" link back to the dashboard,
+    topbar (with its own brand link back to the dashboard,
     search, and user menu) is unaffected — it's a separate component
     included unconditionally below.
 --}}

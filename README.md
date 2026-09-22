@@ -1,4 +1,4 @@
-# Council App
+# Oceancy
 
 A single-login office/council administration app. One Laravel app, one
 database, one [Filament](https://filamentphp.com) admin panel. Every
