@@ -80,16 +80,16 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * This user's capability level in a module (see config/modules.php
-     * keys). `admin` is Approver everywhere; everyone else is Viewer
-     * unless an explicit UserModuleLevel row says otherwise — so every
-     * user has at least Viewer in every module by default.
+     * keys) — an explicit UserModuleLevel row, or Viewer if there isn't
+     * one, so every user has at least Viewer in every module by
+     * default. `admin` (see UserResource::canAccess()) is Users-page
+     * administration only and grants nothing here — every module,
+     * admin included, is assigned like anyone else (see
+     * App\Filament\Resources\Users\Schemas\UserForm's "Module Roles"
+     * section).
      */
     public function roleFor(string $module): ModuleAccessLevel
     {
-        if ($this->hasRole('admin')) {
-            return ModuleAccessLevel::Approver;
-        }
-
         return $this->moduleLevels->firstWhere('module', $module)?->level
             ?? ModuleAccessLevel::Viewer;
     }
@@ -104,20 +104,16 @@ class User extends Authenticatable implements FilamentUser
      * roleFor(), which governs what they can *do* inside a module
      * they're allowed into. `module_access` is null by default, meaning
      * every module in config/modules.php; set it via UserResource to
-     * restrict a user to a subset. `admin` always sees everything.
+     * restrict a user to a subset.
      */
     public function canAccessModule(string $module): bool
     {
-        if ($this->hasRole('admin')) {
-            return true;
-        }
-
         return $this->module_access === null || in_array($module, $this->module_access, true);
     }
 
     public function hasAnyModuleAccess(): bool
     {
-        if ($this->hasRole('admin') || $this->module_access === null) {
+        if ($this->module_access === null) {
             return true;
         }
 
@@ -179,16 +175,8 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(DocumentSigningUserRole::class);
     }
 
-    /**
-     * The system-wide `admin` spatie role bypasses this module's own
-     * role assignments entirely, same as it does for roleFor().
-     */
     public function hasDocumentSigningRole(DocumentSigningRole $role): bool
     {
-        if ($this->hasRole('admin')) {
-            return true;
-        }
-
         return $this->documentSigningRoles->contains(fn (DocumentSigningUserRole $row): bool => $row->role === $role);
     }
 
@@ -197,10 +185,6 @@ class User extends Authenticatable implements FilamentUser
      */
     public function documentSigningRoleList(): array
     {
-        if ($this->hasRole('admin')) {
-            return DocumentSigningRole::cases();
-        }
-
         return $this->documentSigningRoles->pluck('role')->all();
     }
 
@@ -213,16 +197,8 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(BureauUserRole::class);
     }
 
-    /**
-     * The system-wide `admin` spatie role bypasses this module's own
-     * role assignments entirely, same as it does for the other modules.
-     */
     public function hasBureauRole(BureauRole $role): bool
     {
-        if ($this->hasRole('admin')) {
-            return true;
-        }
-
         return $this->bureauRoles->contains(fn (BureauUserRole $row): bool => $row->role === $role);
     }
 
@@ -231,10 +207,6 @@ class User extends Authenticatable implements FilamentUser
      */
     public function bureauRoleList(): array
     {
-        if ($this->hasRole('admin')) {
-            return BureauRole::cases();
-        }
-
         return $this->bureauRoles->pluck('role')->all();
     }
 
@@ -243,9 +215,9 @@ class User extends Authenticatable implements FilamentUser
      * App\Services\Bureau\DecisionVotingService) is measured against
      * every President/Councillor role holder system-wide — not just
      * meeting attendees — so a vote's threshold doesn't shrink just
-     * because some council members are absent. The system-wide `admin`
-     * role does not itself count as council membership; it only
-     * bypasses per-module role checks (see hasBureauRole()).
+     * because some council members are absent. Holding the system-wide
+     * `admin` role doesn't itself count as council membership — only an
+     * explicit President/Councillor BureauUserRole row does.
      */
     public static function bureauCouncilMembershipCount(): int
     {
@@ -265,16 +237,8 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(InventoryUserRole::class);
     }
 
-    /**
-     * The system-wide `admin` spatie role bypasses this module's own
-     * role assignments entirely, same as it does for the other modules.
-     */
     public function hasInventoryRole(InventoryRole $role): bool
     {
-        if ($this->hasRole('admin')) {
-            return true;
-        }
-
         return $this->inventoryRoles->contains(fn (InventoryUserRole $row): bool => $row->role === $role);
     }
 
@@ -283,10 +247,6 @@ class User extends Authenticatable implements FilamentUser
      */
     public function inventoryRoleList(): array
     {
-        if ($this->hasRole('admin')) {
-            return InventoryRole::cases();
-        }
-
         return $this->inventoryRoles->pluck('role')->all();
     }
 
@@ -300,16 +260,8 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(AssetUserRole::class);
     }
 
-    /**
-     * The system-wide `admin` spatie role bypasses this module's own
-     * role assignments entirely, same as it does for the other modules.
-     */
     public function hasAssetRole(AssetRole $role): bool
     {
-        if ($this->hasRole('admin')) {
-            return true;
-        }
-
         return $this->assetRoles->contains(fn (AssetUserRole $row): bool => $row->role === $role);
     }
 
@@ -318,10 +270,6 @@ class User extends Authenticatable implements FilamentUser
      */
     public function assetRoleList(): array
     {
-        if ($this->hasRole('admin')) {
-            return AssetRole::cases();
-        }
-
         return $this->assetRoles->pluck('role')->all();
     }
 }

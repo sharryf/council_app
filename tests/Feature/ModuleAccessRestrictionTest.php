@@ -40,16 +40,21 @@ class ModuleAccessRestrictionTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_admin_ignores_module_access_restrictions(): void
+    /**
+     * `admin` is Users-page administration only — it grants no module
+     * visibility by itself, so an admin restricted to no modules is
+     * excluded exactly like any other restricted user.
+     */
+    public function test_admin_does_not_ignore_module_access_restrictions(): void
     {
         $this->seed(RoleSeeder::class);
         $admin = User::factory()->create(['module_access' => []]);
         $admin->assignRole('admin');
 
-        $this->assertTrue($admin->canAccessModule('document-signing'));
+        $this->assertFalse($admin->canAccessModule('document-signing'));
 
         $this->actingAs($admin)
             ->get(DocumentResource::getUrl('create'))
-            ->assertSuccessful();
+            ->assertForbidden();
     }
 }

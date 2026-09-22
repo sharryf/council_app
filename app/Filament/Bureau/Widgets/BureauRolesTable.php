@@ -16,9 +16,12 @@ use Filament\Widgets\TableWidget;
 
 /**
  * One row per user with access to the bureau module (see
- * User::canAccessModule()); `admin` users are excluded since they hold
- * every BureauRole implicitly (see User::hasBureauRole()) and editing
- * individual rows for them would be meaningless. Same shape as
+ * User::canAccessModule()); `admin` (system administration — see
+ * UserResource::canAccess()) users are excluded because their Bureau
+ * roles, like every module's, are set from the Users page's own
+ * "Module Roles" section instead — one place for a System Admin to see
+ * and set everything about a user at once, rather than hunting across
+ * four separate per-module pages. Same shape as
  * App\Filament\Resources\DocumentSigning\Documents\Widgets\DocumentSigningRolesTable
  * — a table column can't hold a multi-select control, so each row's
  * roles are edited via a modal instead.

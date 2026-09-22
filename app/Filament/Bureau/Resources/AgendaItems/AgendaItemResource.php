@@ -88,10 +88,7 @@ class AgendaItemResource extends Resource
      * role here is approve/reject (see approveAction()/rejectAction()),
      * not editing someone else's proposal. No BureauRole grants
      * override rights over another user's item (the permission table
-     * doesn't list one), but the system-wide `admin` account still can
-     * — same "full bypass" behavior it gets everywhere else in the
-     * app, checked directly here since hasBureauRole() needs a
-     * specific role to test against.
+     * doesn't list one) — only the creator may edit it, full stop.
      */
     public static function canEdit(Model $record): bool
     {
@@ -100,7 +97,7 @@ class AgendaItemResource extends Resource
 
         return $user
             && in_array($record->status, [BureauAgendaStatus::Entered, BureauAgendaStatus::Approved], true)
-            && ($record->created_by === $user->id || $user->hasRole('admin'));
+            && $record->created_by === $user->id;
     }
 
     public static function canDelete(Model $record): bool
@@ -112,15 +109,15 @@ class AgendaItemResource extends Resource
             return false;
         }
 
-        // Creator or admin can delete Entered/Approved items
+        // Creator can delete Entered/Approved items
         if (in_array($record->status, [BureauAgendaStatus::Entered, BureauAgendaStatus::Approved], true)
-            && ($record->created_by === $user->id || $user->hasRole('admin'))) {
+            && $record->created_by === $user->id) {
             return true;
         }
 
         // BureauAdmin can also delete Rejected/AddedToMeeting items
         if (in_array($record->status, [BureauAgendaStatus::Rejected, BureauAgendaStatus::AddedToMeeting], true)
-            && ($user->hasBureauRole(BureauRole::BureauAdmin) || $user->hasRole('admin'))) {
+            && $user->hasBureauRole(BureauRole::BureauAdmin)) {
             return true;
         }
 

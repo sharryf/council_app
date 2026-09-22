@@ -94,7 +94,15 @@ class DocumentSigningVoidTest extends TestCase
         $this->assertNotNull($document->voided_at);
     }
 
-    public function test_a_system_admin_can_void_any_pending_document(): void
+    /**
+     * `admin` is Users-page administration only — DocumentSigningRole::
+     * Admin, this module's own admin-equivalent role, is explicitly
+     * documented to not grant document capability either (see that
+     * enum). Voiding stays uploader-only, full stop — a system admin
+     * granted only Viewer (enough to load and see the document) still
+     * can't void someone else's.
+     */
+    public function test_a_system_admin_cannot_void_a_document_they_did_not_upload(): void
     {
         Storage::fake('local');
         $this->seed(RoleSeeder::class);
@@ -105,17 +113,14 @@ class DocumentSigningVoidTest extends TestCase
 
         $admin = User::factory()->create();
         $admin->assignRole('admin');
+        $admin->documentSigningRoles()->create(['role' => DocumentSigningRole::Viewer]);
 
         $this->actingAs($admin);
 
         Livewire::test(ViewDocument::class, ['record' => $document->getKey()])
-            ->assertActionVisible('void')
-            ->mountAction('void')
-            ->setActionData(['reason' => 'Superseded by a corrected version.'])
-            ->callMountedAction()
-            ->assertHasNoActionErrors();
+            ->assertActionHidden('void');
 
-        $this->assertSame(DocumentStatus::Voided, $document->refresh()->status);
+        $this->assertSame(DocumentStatus::Pending, $document->refresh()->status);
     }
 
     /**

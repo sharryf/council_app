@@ -81,7 +81,13 @@ class DocumentDownloadControllerTest extends TestCase
             ->assertSuccessful();
     }
 
-    public function test_a_system_admin_can_download_the_original(): void
+    /**
+     * `admin` is Users-page administration only — it grants no
+     * document-signing capability by itself, so a bare admin with no
+     * document-signing role of their own, no involvement in this
+     * document, is correctly refused, same as any other outsider.
+     */
+    public function test_a_system_admin_with_no_document_signing_role_cannot_download_the_original(): void
     {
         Storage::fake('local');
         $this->seed(RoleSeeder::class);
@@ -94,7 +100,7 @@ class DocumentDownloadControllerTest extends TestCase
 
         $this->actingAs($admin)
             ->get(route('documents.download.original', $document))
-            ->assertSuccessful();
+            ->assertForbidden();
     }
 
     /**

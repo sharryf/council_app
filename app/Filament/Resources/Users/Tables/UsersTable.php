@@ -29,6 +29,11 @@ class UsersTable
                 TextColumn::make('email')
                     ->label('Email address')
                     ->searchable(),
+                IconColumn::make('is_admin')
+                    ->label('System Admin')
+                    ->boolean()
+                    ->getStateUsing(fn (User $record): bool => $record->hasRole('admin'))
+                    ->tooltip('Can manage Users — separate from module access, see that column'),
                 TextColumn::make('access')
                     ->label('Module access')
                     ->getStateUsing(fn (User $record): string => static::describeAccess($record))
@@ -58,10 +63,6 @@ class UsersTable
 
     private static function describeAccess(User $user): string
     {
-        if ($user->hasRole('admin')) {
-            return 'Admin — every module';
-        }
-
         if ($user->module_access === null) {
             return 'All modules';
         }

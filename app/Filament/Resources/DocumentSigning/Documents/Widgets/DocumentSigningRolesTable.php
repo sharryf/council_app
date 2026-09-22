@@ -15,10 +15,10 @@ use Filament\Widgets\TableWidget;
 
 /**
  * One row per user with access to the document-signing module (see
- * User::canAccessModule()); `admin` users are excluded since they hold
- * every DocumentSigningRole implicitly (see
- * User::hasDocumentSigningRole()) and editing individual rows for them
- * would be meaningless. Each row's roles are edited via a modal — a
+ * User::canAccessModule()); `admin` users are excluded because their
+ * roles are set from the Users page's "Module Roles" section instead —
+ * see App\Filament\Bureau\Widgets\BureauRolesTable's own comment for
+ * the full reasoning. Each row's roles are edited via a modal — a
  * table column can't hold a multi-select control the way
  * Filament\Tables\Columns\SelectColumn holds a single value, which is
  * why this doesn't reuse the SelectColumn-based pattern from

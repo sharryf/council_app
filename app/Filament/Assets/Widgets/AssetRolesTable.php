@@ -15,9 +15,10 @@ use Filament\Widgets\TableWidget;
 
 /**
  * One row per user with access to the assets module (see
- * User::canAccessModule()); `admin` users are excluded since they hold
- * every AssetRole implicitly (see User::hasAssetRole()) — same pattern
- * as App\Filament\Resources\DocumentSigning\Documents\Widgets\DocumentSigningRolesTable.
+ * User::canAccessModule()); `admin` users are excluded because their
+ * roles are set from the Users page's "Module Roles" section instead —
+ * same reasoning and pattern as
+ * App\Filament\Bureau\Widgets\BureauRolesTable / App\Filament\Resources\DocumentSigning\Documents\Widgets\DocumentSigningRolesTable.
  */
 class AssetRolesTable extends TableWidget
 {

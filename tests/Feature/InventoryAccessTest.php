@@ -46,12 +46,30 @@ class InventoryAccessTest extends TestCase
             ->assertOk();
     }
 
-    public function test_the_system_admin_role_bypasses_the_inventory_role_check(): void
+    /**
+     * `admin` is Users-page administration only — it grants no
+     * Inventory role by itself, so a bare admin is refused the panel
+     * exactly like any other user with no inventory role.
+     */
+    public function test_the_system_admin_role_grants_no_inventory_access_by_itself(): void
     {
         $this->seed(RoleSeeder::class);
 
         $user = User::factory()->create();
         $user->assignRole('admin');
+
+        $this->actingAs($user)
+            ->get('/inventory')
+            ->assertForbidden();
+    }
+
+    public function test_an_admin_with_an_explicit_inventory_role_can_reach_the_panel(): void
+    {
+        $this->seed(RoleSeeder::class);
+
+        $user = User::factory()->create();
+        $user->assignRole('admin');
+        $user->inventoryRoles()->create(['role' => \App\Enums\InventoryRole::User]);
 
         $this->actingAs($user)
             ->get('/inventory')

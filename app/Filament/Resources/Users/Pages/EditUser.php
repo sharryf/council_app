@@ -73,6 +73,21 @@ class EditUser extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
+        // canAccessPanel() gates login on is_active alone — deactivating
+        // the account you're currently signed in as would lock you out
+        // on the very next request (including the redirect right after
+        // this save), same shape as the Delete action's and Inventory
+        // Admin's own self-protection above/in InteractsWithModuleAccess.
+        if ($this->record->id === auth()->id() && ! ($data['is_active'] ?? true)) {
+            Notification::make()
+                ->title('Kept your account active')
+                ->body("You can't deactivate the account you're currently signed in as — ask another admin to do it.")
+                ->warning()
+                ->send();
+
+            $data['is_active'] = true;
+        }
+
         return $this->extractModuleLevelFields($data);
     }
 

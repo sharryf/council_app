@@ -42,8 +42,7 @@ class DocumentDownloadController extends Controller
 
         abort_unless($user, 403);
 
-        $isParty = $user->hasRole('admin')
-            || $user->hasDocumentSigningRole(DocumentSigningRole::Viewer)
+        $isParty = $user->hasDocumentSigningRole(DocumentSigningRole::Viewer)
             || $document->uploaded_by === $user->id
             || $document->signers()->where('user_id', $user->id)->exists();
 

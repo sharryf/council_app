@@ -53,7 +53,7 @@ class InventoryStatsOverview extends StatsOverviewWidget
 
         $isApprover = self::userIsApproverOrAbove();
         $isStockAdmin = self::userIsStockAdminOrAbove();
-        $isAdmin = $user->hasRole('admin');
+        $isAdmin = $user->hasInventoryRole(InventoryRole::Admin);
 
         $data = Cache::remember(
             "inventory.dashboard.stats.{$user->id}",

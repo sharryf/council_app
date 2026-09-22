@@ -125,17 +125,22 @@ class DocumentSigningRoleGatingTest extends TestCase
             ->assertActionVisible('sign');
     }
 
-    public function test_admin_holds_every_document_signing_role_without_explicit_rows(): void
+    /**
+     * `admin` is Users-page administration only — a bare admin with no
+     * explicit document-signing role row holds none of them, same as
+     * any other user without one.
+     */
+    public function test_admin_holds_no_document_signing_role_without_explicit_rows(): void
     {
         $this->seed(RoleSeeder::class);
         $admin = User::factory()->create();
         $admin->assignRole('admin');
 
         $this->assertTrue($admin->documentSigningRoles->isEmpty());
-        $this->assertTrue($admin->hasDocumentSigningRole(DocumentSigningRole::Admin));
-        $this->assertTrue($admin->hasDocumentSigningRole(DocumentSigningRole::Editor));
-        $this->assertTrue($admin->hasDocumentSigningRole(DocumentSigningRole::Signee));
-        $this->assertTrue($admin->hasDocumentSigningRole(DocumentSigningRole::Viewer));
+        $this->assertFalse($admin->hasDocumentSigningRole(DocumentSigningRole::Admin));
+        $this->assertFalse($admin->hasDocumentSigningRole(DocumentSigningRole::Editor));
+        $this->assertFalse($admin->hasDocumentSigningRole(DocumentSigningRole::Signee));
+        $this->assertFalse($admin->hasDocumentSigningRole(DocumentSigningRole::Viewer));
     }
 
     public function test_a_user_without_the_viewer_role_only_sees_documents_they_are_involved_in(): void

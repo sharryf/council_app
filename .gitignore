@@ -26,3 +26,6 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 public/adminer.php
+
+# Internal business process notes, not project code — kept local only.
+/deploy/new-client-checklist.md

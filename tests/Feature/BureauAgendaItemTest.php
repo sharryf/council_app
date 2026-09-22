@@ -305,12 +305,30 @@ class BureauAgendaItemTest extends TestCase
             ->assertTableActionHidden('edit', $item);
     }
 
-    public function test_the_system_admin_can_approve_without_an_explicit_bureau_role(): void
+    /**
+     * `admin` is Users-page administration only — it grants no Bureau
+     * role by itself, so a bare admin can't even reach the Bureau
+     * agenda items list (AgendaItemResource::canAccess() requires
+     * holding any BureauRole at all), same as any other user with none.
+     */
+    public function test_a_system_admin_with_no_bureau_role_cannot_reach_agenda_items(): void
+    {
+        $this->seed(RoleSeeder::class);
+        $admin = User::factory()->create();
+        $admin->assignRole('admin');
+
+        $this->actingAs($admin)
+            ->get(AgendaItemResource::getUrl('index'))
+            ->assertForbidden();
+    }
+
+    public function test_a_system_admin_with_the_president_role_can_approve(): void
     {
         $this->seed(RoleSeeder::class);
         $councillor = $this->makeCouncillor();
         $admin = User::factory()->create();
         $admin->assignRole('admin');
+        $admin->bureauRoles()->create(['role' => BureauRole::President]);
 
         $item = BureauAgendaItem::create([
             'details' => 'Adopt the new budget',

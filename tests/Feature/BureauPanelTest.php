@@ -53,16 +53,28 @@ class BureauPanelTest extends TestCase
         $this->assertSame([BureauRole::Councillor], $user->bureauRoleList());
     }
 
-    public function test_the_system_admin_role_implicitly_holds_every_bureau_role(): void
+    /**
+     * `admin` is Users-page administration only (see
+     * UserResource::canAccess()) — it grants nothing in any module,
+     * Bureau included. An admin's own Bureau capability is assigned
+     * explicitly, same as anyone else's.
+     */
+    public function test_the_system_admin_role_grants_no_bureau_role_by_itself(): void
     {
         $this->seed(RoleSeeder::class);
         $admin = User::factory()->create();
         $admin->assignRole('admin');
 
         foreach (BureauRole::cases() as $role) {
-            $this->assertTrue($admin->hasBureauRole($role));
+            $this->assertFalse($admin->hasBureauRole($role));
         }
 
-        $this->assertSame(BureauRole::cases(), $admin->bureauRoleList());
+        $this->assertSame([], $admin->bureauRoleList());
+
+        $admin->bureauRoles()->create(['role' => BureauRole::President]);
+        $admin->refresh();
+
+        $this->assertTrue($admin->hasBureauRole(BureauRole::President));
+        $this->assertFalse($admin->hasBureauRole(BureauRole::Councillor));
     }
 }

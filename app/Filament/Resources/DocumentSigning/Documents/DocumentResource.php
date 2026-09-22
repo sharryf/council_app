@@ -303,7 +303,8 @@ class DocumentResource extends Resource
             ->requiresConfirmation()
             ->modalDescription('This cancels the document without deleting it — signers can no longer sign or reject it. Use this for a document that was sent to the wrong signers or contains the wrong file.')
             ->visible(fn (Document $record): bool => app(DocumentSigningService::class)->canVoid($record)
-                && (($record->uploaded_by === auth()->id() && static::canCreate()) || (auth()->user()?->hasRole('admin') ?? false)))
+                && $record->uploaded_by === auth()->id()
+                && static::canCreate())
             ->schema([
                 Textarea::make('reason')
                     ->label('Reason for voiding')
