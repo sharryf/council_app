@@ -55,6 +55,12 @@ class UserForm
                     ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
                     ->helperText(fn (string $operation): string => $operation === 'edit' ? 'Leave blank to keep the current password.' : ''),
 
+                Toggle::make('is_active')
+                    ->label('Active')
+                    ->default(true)
+                    ->helperText('Off blocks this person from logging in, without deleting their account — use this when someone leaves, since their approvals/requests/signatures stay permanently linked to their user record and can\'t be deleted.')
+                    ->columnSpanFull(),
+
                 Toggle::make('is_admin')
                     ->label('Admin (system owner)')
                     ->helperText('Access to every module at Approver level, plus this Users list. Not tied to the modules below.')

@@ -19,7 +19,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'name_dv', 'position', 'position_dv', 'email', 'password', 'signature_path', 'signature_path_2', 'default_signature_slot', 'module_access'])]
+#[Fillable(['name', 'name_dv', 'position', 'position_dv', 'email', 'password', 'is_active', 'signature_path', 'signature_path_2', 'default_signature_slot', 'module_access'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser
 {
@@ -27,18 +27,35 @@ class User extends Authenticatable implements FilamentUser
     use HasFactory, Notifiable, HasRoles;
 
     /**
-     * Any authenticated user may enter the panel — per-module and
-     * per-action authorization happens inside it (see
+     * The `is_active` column defaults to true at the DB level (see its
+     * migration), but MySQL doesn't hand column defaults back on
+     * INSERT — only the auto-increment id is — so a freshly create()'d
+     * model has no is_active in memory until it's refetched. Setting it
+     * here too means canAccessPanel() never sees null on a brand-new
+     * user (it did before this fix: TypeError, not just a wrong value).
+     */
+    protected $attributes = [
+        'is_active' => true,
+    ];
+
+    /**
+     * Any authenticated, active user may enter the panel — per-module
+     * and per-action authorization happens inside it (see
      * App\Filament\Concerns\HasModuleAccess and roleFor() below), not
-     * at this gate. Without this, Filament's own Authenticate
-     * middleware only allows access when APP_ENV=local, which is a
+     * at this gate. Without the `true` default here, Filament's own
+     * Authenticate middleware only allows access when APP_ENV=local, a
      * documented Filament security default (see
      * Filament\Models\Contracts\FilamentUser) — it would otherwise
      * lock everyone out entirely in staging/production.
+     *
+     * is_active is the one thing that does gate here: a deactivated
+     * user (someone who has left) is never deleted — every
+     * approval/request/signature is a permanent FK to their user row —
+     * so this is what actually stops them signing in.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return true;
+        return $this->is_active;
     }
 
     /**
@@ -51,6 +68,7 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
             'module_access' => 'array',
         ];
     }
