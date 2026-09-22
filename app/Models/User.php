@@ -52,10 +52,17 @@ class User extends Authenticatable implements FilamentUser
      * user (someone who has left) is never deleted — every
      * approval/request/signature is a permanent FK to their user row —
      * so this is what actually stops them signing in.
+     *
+     * Cast explicitly to bool rather than returning the attribute
+     * directly: a row written before is_active existed, or any other
+     * way a live DB row ends up with a genuine NULL in that column
+     * (not just the fresh-model case the $attributes default above
+     * covers), makes this throw a TypeError instead of just gating —
+     * this treats that NULL as "not active" instead of a 500.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return $this->is_active;
+        return (bool) $this->is_active;
     }
 
     /**
