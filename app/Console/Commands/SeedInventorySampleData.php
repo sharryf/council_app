@@ -48,28 +48,37 @@ class SeedInventorySampleData extends Command
 
     protected $description = 'Creates 20 sample items with realistic receipt/issue history for manual testing.';
 
-    /** @var array<int, array{0: string, 1: string, 2: string, 3: int, 4: int}> name, category code, uom code, reorder level, reorder qty */
+    /**
+     * name, category code, uom code, reorder level, reorder qty — the
+     * codes must match InventoryItemCategory/InventoryUnitOfMeasure
+     * exactly as InventorySeeder creates them (STAT/ELEC/CLEAN/IT/
+     * PANTRY/SAFETY/OTHER and PC/BOX/PKT/RM/DOZ/M/ROLL/SET/L/KG/BTL/
+     * PAIR) — anything else silently skips the item (see the "Skipping"
+     * warning below) and throws off every batch index that follows.
+     *
+     * @var array<int, array{0: string, 1: string, 2: string, 3: int, 4: int}>
+     */
     private const CATALOG = [
-        ['Ballpoint Pen Blue', 'ST', 'PC', 50, 200],
-        ['Whiteboard Marker Black', 'ST', 'PC', 20, 60],
-        ['Stapler Medium', 'ST', 'PC', 3, 10],
-        ['Sticky Notes Pad', 'ST', 'PK', 20, 60],
-        ['File Folder A4', 'ST', 'PC', 25, 100],
-        ['First Aid Kit', 'OT', 'SET', 2, 5],
-        ['LED Bulb 9W E27', 'EL', 'PC', 20, 50],
-        ['Extension Cord 5m', 'EL', 'PC', 3, 10],
-        ['Cable 2.5mm 3-core', 'EL', 'MT', 50, 200],
-        ['Switch Socket 13A', 'EL', 'PC', 10, 25],
-        ['AA Batteries Pack of 4', 'EL', 'PK', 15, 40],
-        ['Floor Cleaner 5L', 'CL', 'BT', 5, 12],
-        ['Hand Soap Refill 500ml', 'CL', 'BT', 10, 24],
-        ['Toilet Paper Roll', 'CL', 'RL', 40, 100],
-        ['Garbage Bag Large', 'CL', 'PK', 10, 30],
-        ['Microfibre Cloth', 'CL', 'PC', 10, 25],
+        ['Ballpoint Pen Blue', 'STAT', 'PC', 50, 200],
+        ['Whiteboard Marker Black', 'STAT', 'PC', 20, 60],
+        ['Stapler Medium', 'STAT', 'PC', 3, 10],
+        ['Sticky Notes Pad', 'STAT', 'PKT', 20, 60],
+        ['File Folder A4', 'STAT', 'PC', 25, 100],
+        ['First Aid Kit', 'SAFETY', 'SET', 2, 5],
+        ['LED Bulb 9W E27', 'ELEC', 'PC', 20, 50],
+        ['Extension Cord 5m', 'ELEC', 'PC', 3, 10],
+        ['Cable 2.5mm 3-core', 'ELEC', 'M', 50, 200],
+        ['Switch Socket 13A', 'ELEC', 'PC', 10, 25],
+        ['AA Batteries Pack of 4', 'ELEC', 'PKT', 15, 40],
+        ['Floor Cleaner 5L', 'CLEAN', 'BTL', 5, 12],
+        ['Hand Soap Refill 500ml', 'CLEAN', 'BTL', 10, 24],
+        ['Toilet Paper Roll', 'CLEAN', 'ROLL', 40, 100],
+        ['Garbage Bag Large', 'CLEAN', 'PKT', 10, 30],
+        ['Microfibre Cloth', 'CLEAN', 'PC', 10, 25],
         ['USB Flash Drive 32GB', 'IT', 'PC', 5, 15],
         ['Printer Toner Cartridge Black', 'IT', 'PC', 3, 10],
         ['HDMI Cable 2m', 'IT', 'PC', 5, 15],
-        ['Highlighter Set 4-Colour', 'ST', 'SET', 10, 30],
+        ['Highlighter Set 4-Colour', 'STAT', 'SET', 10, 30],
     ];
 
     /** Which item indices (0-based) land on which GRN — the bulk "in" movements. */
@@ -141,9 +150,13 @@ class SeedInventorySampleData extends Command
         $categories = InventoryItemCategory::query()->get()->keyBy('code');
         $uoms = InventoryUnitOfMeasure::query()->get()->keyBy('code');
 
+        // Keyed by its position in CATALOG (not re-indexed on skip) — every
+        // batch constant below (GRN_BATCHES, ISSUE_BATCHES, ...) refers to
+        // items by that fixed position, so a skipped item must leave a gap
+        // rather than shift every later index onto the wrong item.
         $items = [];
 
-        foreach (self::CATALOG as [$name, $categoryCode, $uomCode, $reorderLevel, $reorderQty]) {
+        foreach (self::CATALOG as $index => [$name, $categoryCode, $uomCode, $reorderLevel, $reorderQty]) {
             $category = $categories->get($categoryCode);
             $uom = $uoms->get($uomCode);
 
@@ -153,7 +166,7 @@ class SeedInventorySampleData extends Command
                 continue;
             }
 
-            $items[] = $itemCreation->create([
+            $items[$index] = $itemCreation->create([
                 'name' => $name,
                 'category_id' => $category->id,
                 'uom_id' => $uom->id,
@@ -161,6 +174,12 @@ class SeedInventorySampleData extends Command
                 'reorder_qty' => $reorderQty,
                 'created_by' => $admin->id,
             ]);
+        }
+
+        if (count($items) !== count(self::CATALOG)) {
+            $this->error('Some catalog items were skipped (see above) — fix CATALOG\'s category/UoM codes before continuing, or the batches below will reference the wrong items.');
+
+            return self::FAILURE;
         }
 
         $this->info(count($items).' items created.');
